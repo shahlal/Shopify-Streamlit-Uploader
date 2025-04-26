@@ -75,12 +75,43 @@ def get_publication_ids():
     publication_ids = [edge["node"]["id"] for edge in data["data"]["publications"]["edges"]]
     return publication_ids
 
+def publish_product(product_id, publication_ids):
+    """Publish the created product to all sales channels."""
+    query = """
+    mutation publishablePublish($id: ID!, $input: PublishablePublishInput!) {
+      publishablePublish(id: $id, input: $input) {
+        publishable {
+          id
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+    """
+    payload = {
+        "query": query,
+        "variables": {
+            "id": product_id,
+            "input": {
+                "publicationIds": publication_ids
+            }
+        }
+    }
+    response = requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
+    data = response.json()
+
+    if data.get("errors") or data["data"]["publishablePublish"]["userErrors"]:
+        st.error(f"Error publishing product: {data}")
+    else:
+        st.success(f"Published product successfully!")
+
 # -----------------------------------
 # 4. SCRAPE FUNCTIONS
 # -----------------------------------
 
 def scrape_collection(collection_url):
-    """Scrape all product links from a Shopify collection page."""
     st.info(f"Scraping collection: {collection_url}")
     headers_browser = {"User-Agent": "Mozilla/5.0"}
     res = requests.get(collection_url, headers=headers_browser, verify=False)
@@ -100,7 +131,6 @@ def scrape_collection(collection_url):
     return product_urls
 
 def scrape_product(product_url):
-    """Scrape a single product page."""
     st.info(f"Scraping product: {product_url}")
     headers_browser = {"User-Agent": "Mozilla/5.0"}
     res = requests.get(product_url, headers=headers_browser, verify=False)
@@ -119,7 +149,6 @@ def scrape_product(product_url):
     handle = product_url.split("/products/")[-1].split("?")[0]
     domain = product_url.split('/')[2]
 
-    # Get variants
     variant_url = f"https://{domain}/products/{handle}.js"
     variants = []
     try:
@@ -156,13 +185,10 @@ def scrape_product(product_url):
     }
 
 # -----------------------------------
-# 5. SHOPIFY UPLOAD FUNCTIONS
+# 5. SHOPIFY PRODUCT CREATION FUNCTIONS
 # -----------------------------------
 
 def create_product_with_variants(product_data):
-    """Create product in Shopify and publish to all sales channels."""
-    publication_ids = get_publication_ids()
-
     query = """
     mutation productSet($product: ProductSetInput!) {
       productSet(input: $product) {
@@ -186,7 +212,6 @@ def create_product_with_variants(product_data):
       }
     }
     """
-
     sizes = list({v["size"] for v in product_data["variants"]})
     product_input = {
         "title": product_data["title"],
@@ -194,10 +219,10 @@ def create_product_with_variants(product_data):
         "descriptionHtml": product_data["body_html"],
         "vendor": product_data["vendor"],
         "productType": product_data["productType"],
-        "publicationIds": publication_ids,
         "productOptions": [{"name": "Size", "position": 1, "values": [{"name": s} for s in sizes]}],
         "variants": []
     }
+
     for v in product_data["variants"]:
         entry = {
             "price": v["price"],
@@ -286,7 +311,7 @@ def upload_media(product_id, product_data):
     requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
 
 # -----------------------------------
-# 6. STREAMLIT MAIN APP
+# 6. MAIN STREAMLIT APP
 # -----------------------------------
 
 def main_app():
@@ -304,6 +329,8 @@ def main_app():
             product_data = scrape_product(input_url)
             product_id, inventory_item_ids = create_product_with_variants(product_data)
             if product_id:
+                publication_ids = get_publication_ids()
+                publish_product(product_id, publication_ids)
                 update_product_category(product_id)
                 enable_inventory_tracking(inventory_item_ids)
                 activate_inventory(inventory_item_ids)
@@ -317,6 +344,8 @@ def main_app():
                 product_data = scrape_product(url)
                 product_id, inventory_item_ids = create_product_with_variants(product_data)
                 if product_id:
+                    publication_ids = get_publication_ids()
+                    publish_product(product_id, publication_ids)
                     update_product_category(product_id)
                     enable_inventory_tracking(inventory_item_ids)
                     activate_inventory(inventory_item_ids)
