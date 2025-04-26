@@ -1,6 +1,8 @@
 import streamlit as st
 import requests
 import json
+import random
+import string
 from bs4 import BeautifulSoup
 
 # -----------------------------------
@@ -48,11 +50,14 @@ def logout_button():
         st.experimental_rerun()
 
 # -----------------------------------
-# 3. SHOPIFY HELPER FUNCTIONS
+# 3. HELPER FUNCTIONS
 # -----------------------------------
 
+def generate_random_suffix(length=5):
+    return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
+
 def get_publication_ids():
-    """Fetch all publication (Sales Channel) IDs."""
+    """Fetch all available sales channels."""
     query = """
     {
       publications(first: 20) {
@@ -76,13 +81,10 @@ def get_publication_ids():
     return publication_ids
 
 def publish_product(product_id, publication_ids):
-    """Publish the created product to all sales channels."""
+    """Publish the product to selected sales channels."""
     query = """
-    mutation publishablePublish($id: ID!, $input: PublishablePublishInput!) {
-      publishablePublish(id: $id, input: $input) {
-        publishable {
-          id
-        }
+    mutation resourcePublicationsPublish($resourceId: ID!, $publicationIds: [ID!]!) {
+      resourcePublicationsPublish(resourceId: $resourceId, publicationIds: $publicationIds) {
         userErrors {
           field
           message
@@ -93,22 +95,20 @@ def publish_product(product_id, publication_ids):
     payload = {
         "query": query,
         "variables": {
-            "id": product_id,
-            "input": {
-                "publicationIds": publication_ids
-            }
+            "resourceId": product_id,
+            "publicationIds": publication_ids
         }
     }
     response = requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
     data = response.json()
 
-    if data.get("errors") or data["data"]["publishablePublish"]["userErrors"]:
+    if data.get("errors") or data["data"]["resourcePublicationsPublish"]["userErrors"]:
         st.error(f"Error publishing product: {data}")
     else:
         st.success(f"Published product successfully!")
 
 # -----------------------------------
-# 4. SCRAPE FUNCTIONS
+# 4. SCRAPING FUNCTIONS
 # -----------------------------------
 
 def scrape_collection(collection_url):
@@ -149,7 +149,10 @@ def scrape_product(product_url):
     handle = product_url.split("/products/")[-1].split("?")[0]
     domain = product_url.split('/')[2]
 
-    variant_url = f"https://{domain}/products/{handle}.js"
+    # ADD random suffix to avoid duplicate handles
+    handle = f"{handle}-{generate_random_suffix()}"
+
+    variant_url = f"https://{domain}/products/{handle.split('-')[0]}.js"  # Note: original handle for variants
     variants = []
     try:
         variant_res = requests.get(variant_url, headers=headers_browser, verify=False)
@@ -185,7 +188,7 @@ def scrape_product(product_url):
     }
 
 # -----------------------------------
-# 5. SHOPIFY PRODUCT CREATION FUNCTIONS
+# 5. SHOPIFY UPLOAD FUNCTIONS
 # -----------------------------------
 
 def create_product_with_variants(product_data):
