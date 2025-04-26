@@ -48,7 +48,35 @@ def logout_button():
         st.experimental_rerun()
 
 # -----------------------------------
-# 3. SCRAPE FUNCTIONS
+# 3. SHOPIFY HELPER FUNCTIONS
+# -----------------------------------
+
+def get_publication_ids():
+    """Fetch all publication (Sales Channel) IDs."""
+    query = """
+    {
+      publications(first: 20) {
+        edges {
+          node {
+            id
+            name
+          }
+        }
+      }
+    }
+    """
+    response = requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json={"query": query}, verify=False)
+    data = response.json()
+
+    if data.get("errors"):
+        st.error(f"Error fetching publications: {data}")
+        return []
+
+    publication_ids = [edge["node"]["id"] for edge in data["data"]["publications"]["edges"]]
+    return publication_ids
+
+# -----------------------------------
+# 4. SCRAPE FUNCTIONS
 # -----------------------------------
 
 def scrape_collection(collection_url):
@@ -128,10 +156,13 @@ def scrape_product(product_url):
     }
 
 # -----------------------------------
-# 4. SHOPIFY UPLOAD FUNCTIONS
+# 5. SHOPIFY UPLOAD FUNCTIONS
 # -----------------------------------
 
 def create_product_with_variants(product_data):
+    """Create product in Shopify and publish to all sales channels."""
+    publication_ids = get_publication_ids()
+
     query = """
     mutation productSet($product: ProductSetInput!) {
       productSet(input: $product) {
@@ -155,6 +186,7 @@ def create_product_with_variants(product_data):
       }
     }
     """
+
     sizes = list({v["size"] for v in product_data["variants"]})
     product_input = {
         "title": product_data["title"],
@@ -162,6 +194,7 @@ def create_product_with_variants(product_data):
         "descriptionHtml": product_data["body_html"],
         "vendor": product_data["vendor"],
         "productType": product_data["productType"],
+        "publicationIds": publication_ids,
         "productOptions": [{"name": "Size", "position": 1, "values": [{"name": s} for s in sizes]}],
         "variants": []
     }
@@ -253,21 +286,21 @@ def upload_media(product_id, product_data):
     requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
 
 # -----------------------------------
-# 5. STREAMLIT MAIN APP
+# 6. STREAMLIT MAIN APP
 # -----------------------------------
 
 def main_app():
-    st.title("🚀 Shopify Uploader")
-    st.write("Upload Products from a Shopify Product URL or Collection URL.")
+    st.title("🚀 Shopify Product Uploader")
+    st.write("Paste a **Product URL** or a **Collection URL** to scrape and upload to Shopify.")
 
     input_url = st.text_input("Enter Product or Collection URL:")
     if st.button("Run Upload"):
         if not input_url:
-            st.warning("Please enter a URL.")
+            st.warning("Please enter a valid URL.")
             return
 
         if "/products/" in input_url:
-            st.info("Single Product Mode")
+            st.info("Uploading Single Product...")
             product_data = scrape_product(input_url)
             product_id, inventory_item_ids = create_product_with_variants(product_data)
             if product_id:
@@ -276,9 +309,9 @@ def main_app():
                 activate_inventory(inventory_item_ids)
                 set_inventory_quantity(inventory_item_ids)
                 upload_media(product_id, product_data)
-                st.success(f"Uploaded {product_data.get('title')} successfully.")
+                st.success(f"Uploaded {product_data.get('title')} successfully!")
         else:
-            st.info("Collection Mode")
+            st.info("Uploading Collection of Products...")
             product_urls = scrape_collection(input_url)
             for url in product_urls:
                 product_data = scrape_product(url)
@@ -289,10 +322,10 @@ def main_app():
                     activate_inventory(inventory_item_ids)
                     set_inventory_quantity(inventory_item_ids)
                     upload_media(product_id, product_data)
-                    st.success(f"Uploaded {product_data.get('title')} successfully.")
+                    st.success(f"Uploaded {product_data.get('title')} successfully!")
 
 # -----------------------------------
-# 6. ENTRY POINT
+# 7. ENTRY POINT
 # -----------------------------------
 
 def run():
