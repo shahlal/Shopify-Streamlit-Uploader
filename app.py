@@ -122,18 +122,50 @@ def scrape_product(product_url):
     }
 
 # 📦 Fetch Shopify Collections (MANUAL ONLY)
-def fetch_collections():
+def fetch_collections_and_tags():
     query = """
     {
-      collections(first: 100, query:"collection_type:manual") {
+      collections(first: 100) {
         edges {
-          node { id title }
+          node { 
+            id 
+            title
+            ruleSet {
+              rules {
+                column
+              }
+            }
+          }
+        }
+      }
+      shop {
+        productTags(first: 250) {
+          edges {
+            node
+          }
         }
       }
     }
     """
+
     response = requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json={"query": query}, verify=False)
-    return response.json()["data"]["collections"]["edges"]
+    response_json = response.json()
+
+    if "data" not in response_json:
+        st.error(f"Shopify API error: {response_json}")
+        return [], []
+
+    collections = response_json["data"]["collections"]["edges"]
+    tags = response_json["data"]["shop"]["productTags"]["edges"]
+
+    manual_collections = [
+        c for c in collections 
+        if not c["node"].get("ruleSet") or not c["node"]["ruleSet"].get("rules")
+    ]
+
+    tag_list = sorted(tag["node"] for tag in tags)
+
+    return manual_collections, tag_list
 
 
 # -----------------------------------
@@ -171,6 +203,7 @@ def create_product_with_variants(product_data):
         "descriptionHtml": product_data["body_html"],
         "vendor": product_data["vendor"],
         "productType": product_data["productType"],
+        "tags": product_data.get("tags", []),  # Include tags here
         "productOptions": [{"name": "Size", "position": 1, "values": [{"name": s} for s in sizes]}],
         "variants": []
     }
@@ -196,6 +229,7 @@ def create_product_with_variants(product_data):
     product_id = data["data"]["productSet"]["product"]["id"]
     inventory_items = [edge["node"]["inventoryItem"]["id"] for edge in data["data"]["productSet"]["product"]["variants"]["edges"]]
     return product_id, inventory_items
+
 
 def update_product_category(product_id):
     query = """
@@ -335,10 +369,13 @@ def main_app():
 
     input_url = st.text_input("Enter Product or Collection URL:")
 
-    # Fetch collections for selection
-    collections = fetch_collections()
+    # Fetch manual collections and tags for selection
+    collections, tags = fetch_collections_and_tags()
+
     collection_options = {col["node"]["title"]: col["node"]["id"] for col in collections}
     selected_collections = st.multiselect("Select Collections to Assign:", options=collection_options.keys())
+
+    selected_tags = st.multiselect("Select Tags to Assign:", options=tags)
 
     if st.button("Run Upload"):
         if not input_url:
@@ -350,6 +387,10 @@ def main_app():
         if "/products/" in input_url:
             st.info("Single Product Mode")
             product_data = scrape_product(input_url)
+
+            # Add selected tags to product
+            product_data["tags"] = selected_tags
+
             product_id, inventory_item_ids = create_product_with_variants(product_data)
             if product_id:
                 update_product_category(product_id)
@@ -366,6 +407,10 @@ def main_app():
             product_urls = scrape_collection(input_url)
             for url in product_urls:
                 product_data = scrape_product(url)
+                
+                # Add selected tags to product
+                product_data["tags"] = selected_tags
+
                 product_id, inventory_item_ids = create_product_with_variants(product_data)
                 if product_id:
                     update_product_category(product_id)
@@ -377,6 +422,7 @@ def main_app():
                     publish_product(product_id, publication_ids)
                     add_product_to_collections(product_id, collection_ids)
                     st.success(f"Uploaded {product_data.get('title')} successfully!")
+
 
 
 # -----------------------------------
