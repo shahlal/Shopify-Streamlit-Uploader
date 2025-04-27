@@ -52,7 +52,6 @@ def logout_button():
 # -----------------------------------
 
 def scrape_collection(collection_url):
-    """Scrape all product links from a Shopify collection page."""
     st.info(f"Scraping collection: {collection_url}")
     headers_browser = {"User-Agent": "Mozilla/5.0"}
     res = requests.get(collection_url, headers=headers_browser, verify=False)
@@ -70,7 +69,6 @@ def scrape_collection(collection_url):
     return product_urls
 
 def scrape_product(product_url):
-    """Scrape a single product page."""
     st.info(f"Scraping product: {product_url}")
     headers_browser = {"User-Agent": "Mozilla/5.0"}
     res = requests.get(product_url, headers=headers_browser, verify=False)
@@ -88,7 +86,6 @@ def scrape_product(product_url):
     handle = product_url.split("/products/")[-1].split("?")[0]
     domain = product_url.split('/')[2]
 
-    # Get variants
     variant_url = f"https://{domain}/products/{handle}.js"
     variants = []
     try:
@@ -123,6 +120,20 @@ def scrape_product(product_url):
         "variants": variants,
         "images": images_clean
     }
+
+# 📦 Fetch Shopify Collections
+def fetch_collections():
+    query = """
+    {
+      collections(first: 100) {
+        edges {
+          node { id title }
+        }
+      }
+    }
+    """
+    response = requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json={"query": query}, verify=False)
+    return response.json()["data"]["collections"]["edges"]
 
 # -----------------------------------
 # 4. SHOPIFY UPLOAD FUNCTIONS
