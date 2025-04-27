@@ -52,6 +52,7 @@ def logout_button():
 # -----------------------------------
 
 def scrape_collection(collection_url):
+    """Scrape all product links from a Shopify collection page."""
     st.info(f"Scraping collection: {collection_url}")
     headers_browser = {"User-Agent": "Mozilla/5.0"}
     res = requests.get(collection_url, headers=headers_browser, verify=False)
@@ -69,6 +70,7 @@ def scrape_collection(collection_url):
     return product_urls
 
 def scrape_product(product_url):
+    """Scrape a single product page."""
     st.info(f"Scraping product: {product_url}")
     headers_browser = {"User-Agent": "Mozilla/5.0"}
     res = requests.get(product_url, headers=headers_browser, verify=False)
@@ -86,6 +88,7 @@ def scrape_product(product_url):
     handle = product_url.split("/products/")[-1].split("?")[0]
     domain = product_url.split('/')[2]
 
+    # Get variants
     variant_url = f"https://{domain}/products/{handle}.js"
     variants = []
     try:
@@ -122,17 +125,174 @@ def scrape_product(product_url):
     }
 
 # -----------------------------------
-# 4. SHOPIFY UPLOAD FUNCTIONS (unchanged, working correctly)
+# 4. SHOPIFY UPLOAD FUNCTIONS
 # -----------------------------------
 
-# (Include all existing Shopify functions: create_product_with_variants, update_product_category, 
-# enable_inventory_tracking, activate_inventory, set_inventory_quantity, upload_media, 
-# get_publication_ids, publish_product here without modification. These were working perfectly.)
+def create_product_with_variants(product_data):
+    query = """
+    mutation productSet($product: ProductSetInput!) {
+      productSet(input: $product) {
+        product {
+          id
+          variants(first: 50) {
+            edges {
+              node {
+                id
+                inventoryItem {
+                  id
+                }
+              }
+            }
+          }
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+    """
+    sizes = list({v["size"] for v in product_data["variants"]})
+    product_input = {
+        "title": product_data["title"],
+        "handle": product_data["handle"],
+        "descriptionHtml": product_data["body_html"],
+        "vendor": product_data["vendor"],
+        "productType": product_data["productType"],
+        "productOptions": [{"name": "Size", "position": 1, "values": [{"name": s} for s in sizes]}],
+        "variants": []
+    }
+    for v in product_data["variants"]:
+        entry = {
+            "price": v["price"],
+            "optionValues": [{"optionName": "Size", "name": v["size"]}]
+        }
+        if v["compareAtPrice"]:
+            entry["compareAtPrice"] = v["compareAtPrice"]
+        if v["sku"]:
+            entry["sku"] = v["sku"]
+        product_input["variants"].append(entry)
 
-# (For brevity, they remain identical to your last fully working script.)
+    payload = {"query": query, "variables": {"product": product_input}}
+    response = requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
+    data = response.json()
+
+    if data.get("errors") or data["data"]["productSet"]["userErrors"]:
+        st.error(f"Error creating product: {data}")
+        return None, []
+
+    product_id = data["data"]["productSet"]["product"]["id"]
+    inventory_items = [edge["node"]["inventoryItem"]["id"] for edge in data["data"]["productSet"]["product"]["variants"]["edges"]]
+    return product_id, inventory_items
+
+def update_product_category(product_id):
+    query = """
+    mutation productUpdate($product: ProductUpdateInput!) {
+      productUpdate(product: $product) {
+        product { id }
+        userErrors { field message }
+      }
+    }
+    """
+    payload = {"query": query, "variables": {"product": {"id": product_id, "category": PRODUCT_CATEGORY_ID}}}
+    requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
+
+def enable_inventory_tracking(inventory_item_ids):
+    query = """
+    mutation inventoryItemUpdate($id: ID!, $input: InventoryItemInput!) {
+      inventoryItemUpdate(id: $id, input: $input) {
+        inventoryItem { id tracked }
+        userErrors { field message }
+      }
+    }
+    """
+    for item_id in inventory_item_ids:
+        payload = {"query": query, "variables": {"id": item_id, "input": {"tracked": True}}}
+        requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
+
+def activate_inventory(inventory_item_ids):
+    query = """
+    mutation inventoryActivate($inventoryItemId: ID!, $locationId: ID!) {
+      inventoryActivate(inventoryItemId: $inventoryItemId, locationId: $locationId) {
+        userErrors { field message }
+      }
+    }
+    """
+    for item_id in inventory_item_ids:
+        payload = {"query": query, "variables": {"inventoryItemId": item_id, "locationId": LOCATION_ID}}
+        requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
+
+def set_inventory_quantity(inventory_item_ids):
+    query = """
+    mutation inventorySetQuantities($input: InventorySetQuantitiesInput!) {
+      inventorySetQuantities(input: $input) {
+        userErrors { field message }
+      }
+    }
+    """
+    changes = [{"inventoryItemId": item_id, "locationId": LOCATION_ID, "quantity": DEFAULT_STOCK} for item_id in inventory_item_ids]
+    payload = {"query": query, "variables": {"input": {"name": "available", "reason": "correction", "ignoreCompareQuantity": True, "quantities": changes}}}
+    requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
+
+def upload_media(product_id, product_data):
+    query = """
+    mutation productCreateMedia($productId: ID!, $media: [CreateMediaInput!]!) {
+      productCreateMedia(productId: $productId, media: $media) {
+        media { id status }
+        userErrors { field message }
+      }
+    }
+    """
+    media_list = [{"originalSource": img["originalSource"], "mediaContentType": img["mediaContentType"], "alt": img.get("altText", "")} for img in product_data["images"]]
+    if not media_list:
+        return
+    payload = {"query": query, "variables": {"productId": product_id, "media": media_list}}
+    requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
+
+# 📋 SALES CHANNELS - New
+
+def get_publication_ids():
+    query = """
+    {
+      publications(first: 20) {
+        edges {
+          node {
+            id
+          }
+        }
+      }
+    }
+    """
+    response = requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json={"query": query}, verify=False)
+    return [edge["node"]["id"] for edge in response.json()["data"]["publications"]["edges"]]
+
+def publish_product(product_id, publication_ids):
+    query = """
+    mutation PublishProduct($input: ProductPublishInput!) {
+      productPublish(input: $input) {
+        product {
+          id
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+    """
+    payload = {
+        "query": query,
+        "variables": {
+            "input": {
+                "id": product_id,
+                "productPublications": [{"publicationId": pub_id} for pub_id in publication_ids]
+            }
+        }
+    }
+    requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
 
 # -----------------------------------
-# 5. STREAMLIT MAIN APP (WITH DEBUGGING)
+# 6. STREAMLIT MAIN APP
 # -----------------------------------
 
 def main_app():
@@ -147,50 +307,34 @@ def main_app():
         if "/products/" in input_url:
             st.info("Single Product Mode")
             product_data = scrape_product(input_url)
-            st.write("Scraped Product Data:", product_data)
-
             product_id, inventory_item_ids = create_product_with_variants(product_data)
-            if not product_id:
-                st.error("Product creation failed! Stopping process.")
-                return
-            st.write(f"Product ID: {product_id}, Inventory IDs: {inventory_item_ids}")
-
-            update_product_category(product_id)
-
-            enable_inventory_tracking(inventory_item_ids)
-            activate_inventory(inventory_item_ids)
-            set_inventory_quantity(inventory_item_ids)
-
-            upload_media(product_id, product_data)
-            publication_ids = get_publication_ids()
-            publish_product(product_id, publication_ids)
-            st.success(f"Uploaded {product_data.get('title')} successfully!")
+            if product_id:
+                update_product_category(product_id)
+                enable_inventory_tracking(inventory_item_ids)
+                activate_inventory(inventory_item_ids)
+                set_inventory_quantity(inventory_item_ids)
+                upload_media(product_id, product_data)
+                publication_ids = get_publication_ids()
+                publish_product(product_id, publication_ids)
+                st.success(f"Uploaded {product_data.get('title')} successfully!")
         else:
             st.info("Collection Mode")
             product_urls = scrape_collection(input_url)
             for url in product_urls:
                 product_data = scrape_product(url)
-                st.write("Scraped Product Data:", product_data)
-
                 product_id, inventory_item_ids = create_product_with_variants(product_data)
-                if not product_id:
-                    st.error(f"Product creation failed for {product_data.get('title')}. Skipping.")
-                    continue
-                st.write(f"Product ID: {product_id}, Inventory IDs: {inventory_item_ids}")
-
-                update_product_category(product_id)
-
-                enable_inventory_tracking(inventory_item_ids)
-                activate_inventory(inventory_item_ids)
-                set_inventory_quantity(inventory_item_ids)
-
-                upload_media(product_id, product_data)
-                publication_ids = get_publication_ids()
-                publish_product(product_id, publication_ids)
-                st.success(f"Uploaded {product_data.get('title')} successfully!")
+                if product_id:
+                    update_product_category(product_id)
+                    enable_inventory_tracking(inventory_item_ids)
+                    activate_inventory(inventory_item_ids)
+                    set_inventory_quantity(inventory_item_ids)
+                    upload_media(product_id, product_data)
+                    publication_ids = get_publication_ids()
+                    publish_product(product_id, publication_ids)
+                    st.success(f"Uploaded {product_data.get('title')} successfully!")
 
 # -----------------------------------
-# 6. ENTRY POINT
+# 7. ENTRY POINT
 # -----------------------------------
 
 def run():
