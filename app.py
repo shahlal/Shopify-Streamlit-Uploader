@@ -57,7 +57,6 @@ def generate_random_suffix(length=5):
     return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
 
 def get_publication_ids():
-    """Fetch all available sales channel IDs."""
     query = """
     {
       publications(first: 20) {
@@ -71,16 +70,12 @@ def get_publication_ids():
     """
     response = requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json={"query": query}, verify=False)
     data = response.json()
-
     if data.get("errors"):
         st.error(f"Error fetching publications: {data}")
         return []
-
-    publication_ids = [edge["node"]["id"] for edge in data["data"]["publications"]["edges"]]
-    return publication_ids
+    return [edge["node"]["id"] for edge in data["data"]["publications"]["edges"]]
 
 def publish_product(product_id, publication_ids):
-    """Publish a product to all sales channels."""
     query = """
     mutation PublishProduct($input: ProductPublishInput!) {
       productPublish(input: $input) {
@@ -106,11 +101,8 @@ def publish_product(product_id, publication_ids):
     }
     response = requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
     data = response.json()
-
     if data.get("errors") or data["data"]["productPublish"]["userErrors"]:
         st.error(f"Error publishing product: {data}")
-    else:
-        st.success("Product published successfully!")
 
 # -----------------------------------
 # 4. SCRAPING FUNCTIONS
@@ -122,7 +114,6 @@ def scrape_collection(collection_url):
     res = requests.get(collection_url, headers=headers_browser, verify=False)
     res.raise_for_status()
     soup = BeautifulSoup(res.text, "html.parser")
-
     domain = collection_url.split('/')[2]
     product_urls = []
     for link in soup.find_all('a', href=True):
@@ -131,7 +122,6 @@ def scrape_collection(collection_url):
             full_link = f"https://{domain}{href.split('?')[0]}"
             if full_link not in product_urls:
                 product_urls.append(full_link)
-
     st.success(f"Found {len(product_urls)} products.")
     return product_urls
 
@@ -191,7 +181,7 @@ def scrape_product(product_url):
     }
 
 # -----------------------------------
-# 5. SHOPIFY PRODUCT CREATION FUNCTIONS
+# 5. SHOPIFY UPLOAD FUNCTIONS
 # -----------------------------------
 
 def create_product_with_variants(product_data):
@@ -226,7 +216,8 @@ def create_product_with_variants(product_data):
         "vendor": product_data["vendor"],
         "productType": product_data["productType"],
         "productOptions": [{"name": "Size", "position": 1, "values": [{"name": s} for s in sizes]}],
-        "variants": []
+        "variants": [],
+        "status": "ACTIVE"  # Publish product immediately
     }
 
     for v in product_data["variants"]:
@@ -243,7 +234,6 @@ def create_product_with_variants(product_data):
     payload = {"query": query, "variables": {"product": product_input}}
     response = requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
     data = response.json()
-
     if data.get("errors") or data["data"]["productSet"]["userErrors"]:
         st.error(f"Error creating product: {data}")
         return None, []
@@ -251,6 +241,33 @@ def create_product_with_variants(product_data):
     product_id = data["data"]["productSet"]["product"]["id"]
     inventory_items = [edge["node"]["inventoryItem"]["id"] for edge in data["data"]["productSet"]["product"]["variants"]["edges"]]
     return product_id, inventory_items
+
+def upload_media(product_id, product_data):
+    query = """
+    mutation productCreateMedia($productId: ID!, $media: [CreateMediaInput!]!) {
+      productCreateMedia(productId: $productId, media: $media) {
+        media {
+          id
+          status
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+    """
+    media_list = [{
+        "originalSource": img["originalSource"],
+        "mediaContentType": img["mediaContentType"],
+        "alt": img.get("altText", "")
+    } for img in product_data["images"]]
+
+    if not media_list:
+        return
+
+    payload = {"query": query, "variables": {"productId": product_id, "media": media_list}}
+    requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
 
 # -----------------------------------
 # 6. MAIN STREAMLIT APP
@@ -273,6 +290,7 @@ def main_app():
             if product_id:
                 publication_ids = get_publication_ids()
                 publish_product(product_id, publication_ids)
+                upload_media(product_id, product_data)
                 st.success(f"Uploaded {product_data.get('title')} successfully!")
         else:
             st.info("Uploading Collection of Products...")
@@ -283,6 +301,7 @@ def main_app():
                 if product_id:
                     publication_ids = get_publication_ids()
                     publish_product(product_id, publication_ids)
+                    upload_media(product_id, product_data)
                     st.success(f"Uploaded {product_data.get('title')} successfully!")
 
 # -----------------------------------
