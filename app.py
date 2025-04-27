@@ -58,7 +58,6 @@ def scrape_collection(collection_url):
     res = requests.get(collection_url, headers=headers_browser, verify=False)
     res.raise_for_status()
     soup = BeautifulSoup(res.text, "html.parser")
-
     domain = collection_url.split('/')[2]
     product_urls = []
     for link in soup.find_all('a', href=True):
@@ -67,7 +66,6 @@ def scrape_collection(collection_url):
             full_link = f"https://{domain}{href.split('?')[0]}"
             if full_link not in product_urls:
                 product_urls.append(full_link)
-
     st.success(f"Found {len(product_urls)} products.")
     return product_urls
 
@@ -78,7 +76,6 @@ def scrape_product(product_url):
     res = requests.get(product_url, headers=headers_browser, verify=False)
     res.raise_for_status()
     soup = BeautifulSoup(res.text, "html.parser")
-
     script = soup.find("script", type="application/ld+json")
     data = json.loads(script.string) if script and script.string else {}
 
@@ -252,13 +249,54 @@ def upload_media(product_id, product_data):
     payload = {"query": query, "variables": {"productId": product_id, "media": media_list}}
     requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
 
+# 📋 SALES CHANNELS - New
+
+def get_publication_ids():
+    query = """
+    {
+      publications(first: 20) {
+        edges {
+          node {
+            id
+          }
+        }
+      }
+    }
+    """
+    response = requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json={"query": query}, verify=False)
+    return [edge["node"]["id"] for edge in response.json()["data"]["publications"]["edges"]]
+
+def publish_product(product_id, publication_ids):
+    query = """
+    mutation PublishProduct($input: ProductPublishInput!) {
+      productPublish(input: $input) {
+        product {
+          id
+        }
+        userErrors {
+          field
+          message
+        }
+      }
+    }
+    """
+    payload = {
+        "query": query,
+        "variables": {
+            "input": {
+                "id": product_id,
+                "productPublications": [{"publicationId": pub_id} for pub_id in publication_ids]
+            }
+        }
+    }
+    requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
+
 # -----------------------------------
-# 5. STREAMLIT MAIN APP
+# 6. STREAMLIT MAIN APP
 # -----------------------------------
 
 def main_app():
     st.title("🚀 Shopify Uploader")
-    st.write("Upload Products from a Shopify Product URL or Collection URL.")
 
     input_url = st.text_input("Enter Product or Collection URL:")
     if st.button("Run Upload"):
@@ -276,7 +314,9 @@ def main_app():
                 activate_inventory(inventory_item_ids)
                 set_inventory_quantity(inventory_item_ids)
                 upload_media(product_id, product_data)
-                st.success(f"Uploaded {product_data.get('title')} successfully.")
+                publication_ids = get_publication_ids()
+                publish_product(product_id, publication_ids)
+                st.success(f"Uploaded {product_data.get('title')} successfully!")
         else:
             st.info("Collection Mode")
             product_urls = scrape_collection(input_url)
@@ -289,10 +329,12 @@ def main_app():
                     activate_inventory(inventory_item_ids)
                     set_inventory_quantity(inventory_item_ids)
                     upload_media(product_id, product_data)
-                    st.success(f"Uploaded {product_data.get('title')} successfully.")
+                    publication_ids = get_publication_ids()
+                    publish_product(product_id, publication_ids)
+                    st.success(f"Uploaded {product_data.get('title')} successfully!")
 
 # -----------------------------------
-# 6. ENTRY POINT
+# 7. ENTRY POINT
 # -----------------------------------
 
 def run():
