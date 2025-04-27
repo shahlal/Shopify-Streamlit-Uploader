@@ -77,6 +77,7 @@ def scrape_product(product_url):
     script = soup.find("script", type="application/ld+json")
     data = json.loads(script.string) if script and script.string else {}
 
+    # Original logic for extracting title, description, images, etc.
     title = data.get("name", "No Title Found")
     description = data.get("description", "No Description Found")
     images = data.get("image", [])
@@ -86,6 +87,28 @@ def scrape_product(product_url):
     handle = product_url.split("/products/")[-1].split("?")[0]
     domain = product_url.split('/')[2]
 
+    # Extract vendor from the domain, capitalising the first letter
+    vendor = domain.split('.')[0].capitalize()
+
+    # Attempt to find a "collection" name in the HTML
+    # For example, scanning for <a> links that contain '/collections/' but not '/products/'
+    # We'll pick the first valid one we come across. If none found, None.
+    collection_name = None
+    collection_link = soup.find('a', href=lambda x: x and '/collections/' in x and '/products/' not in x)
+    if collection_link:
+        possible_coll_text = collection_link.get_text(strip=True)
+        if possible_coll_text and possible_coll_text.lower() not in ["all products", "all"]:
+            collection_name = possible_coll_text
+
+    # Format the final displayed title
+    # If there's a valid collection_name, use it in the format "Vendor | Collection | Original Product Name"
+    # If not, just use "Vendor | Original Product Name"
+    if collection_name:
+        formatted_title = f"{vendor} | {collection_name} | {title}"
+    else:
+        formatted_title = f"{vendor} | {title}"
+
+    # Now fetch variant info (as in your original script)
     variant_url = f"https://{domain}/products/{handle}.js"
     variants = []
     try:
@@ -113,9 +136,10 @@ def scrape_product(product_url):
 
     return {
         "handle": handle,
-        "title": title,
+        # Insert the new formatted title
+        "title": formatted_title,
         "body_html": description,
-        "vendor": domain.split('.')[0].capitalize(),
+        "vendor": vendor,
         "variants": variants,
         "images": images_clean
     }
