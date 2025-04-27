@@ -305,15 +305,46 @@ def publish_product(product_id, publication_ids):
 # -----------------------------------
 # 6. STREAMLIT MAIN APP
 # -----------------------------------
+def add_product_to_collections(product_id, collection_ids):
+    query = """
+    mutation collectionAddProducts($id: ID!, $productIds: [ID!]!) {
+        collectionAddProducts(id: $id, productIds: $productIds) {
+            collection {
+                id
+            }
+            userErrors {
+                field
+                message
+            }
+        }
+    }
+    """
+    for collection_id in collection_ids:
+        payload = {
+            "query": query,
+            "variables": {"id": collection_id, "productIds": [product_id]}
+        }
+        response = requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
+        result = response.json()
+        if result.get("errors") or result["data"]["collectionAddProducts"]["userErrors"]:
+            st.warning(f"Error adding to collection {collection_id}: {result}")
 
 def main_app():
     st.title("🚀 Shopify Uploader")
 
     input_url = st.text_input("Enter Product or Collection URL:")
+
+    # Fetch collections for selection
+    collections = fetch_collections()
+    collection_options = {col["node"]["title"]: col["node"]["id"] for col in collections}
+    selected_collections = st.multiselect("Select Collections to Assign:", options=collection_options.keys())
+
     if st.button("Run Upload"):
         if not input_url:
             st.warning("Please enter a URL.")
             return
+
+        collection_ids = [collection_options[name] for name in selected_collections]
 
         if "/products/" in input_url:
             st.info("Single Product Mode")
@@ -327,6 +358,7 @@ def main_app():
                 upload_media(product_id, product_data)
                 publication_ids = get_publication_ids()
                 publish_product(product_id, publication_ids)
+                add_product_to_collections(product_id, collection_ids)
                 st.success(f"Uploaded {product_data.get('title')} successfully!")
         else:
             st.info("Collection Mode")
@@ -342,7 +374,9 @@ def main_app():
                     upload_media(product_id, product_data)
                     publication_ids = get_publication_ids()
                     publish_product(product_id, publication_ids)
+                    add_product_to_collections(product_id, collection_ids)
                     st.success(f"Uploaded {product_data.get('title')} successfully!")
+
 
 # -----------------------------------
 # 7. ENTRY POINT
