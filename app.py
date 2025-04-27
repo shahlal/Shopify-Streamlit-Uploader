@@ -57,14 +57,13 @@ def generate_random_suffix(length=5):
     return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
 
 def get_publication_ids():
-    """Fetch all available sales channels."""
+    """Fetch all available sales channel IDs."""
     query = """
     {
       publications(first: 20) {
         edges {
           node {
             id
-            name
           }
         }
       }
@@ -81,10 +80,14 @@ def get_publication_ids():
     return publication_ids
 
 def publish_product(product_id, publication_ids):
-    """Publish the product to selected sales channels."""
+    """Publish a product to all sales channels."""
     query = """
-    mutation resourcePublicationsPublish($resourceId: ID!, $publicationIds: [ID!]!) {
-      resourcePublicationsPublish(resourceId: $resourceId, publicationIds: $publicationIds) {
+    mutation PublishProduct($input: ProductPublishInput!) {
+      productPublish(input: $input) {
+        product {
+          id
+          status
+        }
         userErrors {
           field
           message
@@ -95,17 +98,19 @@ def publish_product(product_id, publication_ids):
     payload = {
         "query": query,
         "variables": {
-            "resourceId": product_id,
-            "publicationIds": publication_ids
+            "input": {
+                "id": product_id,
+                "productPublications": [{"publicationId": pub_id} for pub_id in publication_ids]
+            }
         }
     }
     response = requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
     data = response.json()
 
-    if data.get("errors") or data["data"]["resourcePublicationsPublish"]["userErrors"]:
+    if data.get("errors") or data["data"]["productPublish"]["userErrors"]:
         st.error(f"Error publishing product: {data}")
     else:
-        st.success(f"Published product successfully!")
+        st.success("Product published successfully!")
 
 # -----------------------------------
 # 4. SCRAPING FUNCTIONS
@@ -148,11 +153,9 @@ def scrape_product(product_url):
 
     handle = product_url.split("/products/")[-1].split("?")[0]
     domain = product_url.split('/')[2]
-
-    # ADD random suffix to avoid duplicate handles
     handle = f"{handle}-{generate_random_suffix()}"
 
-    variant_url = f"https://{domain}/products/{handle.split('-')[0]}.js"  # Note: original handle for variants
+    variant_url = f"https://{domain}/products/{handle.split('-')[0]}.js"
     variants = []
     try:
         variant_res = requests.get(variant_url, headers=headers_browser, verify=False)
@@ -188,7 +191,7 @@ def scrape_product(product_url):
     }
 
 # -----------------------------------
-# 5. SHOPIFY UPLOAD FUNCTIONS
+# 5. SHOPIFY PRODUCT CREATION FUNCTIONS
 # -----------------------------------
 
 def create_product_with_variants(product_data):
@@ -249,70 +252,6 @@ def create_product_with_variants(product_data):
     inventory_items = [edge["node"]["inventoryItem"]["id"] for edge in data["data"]["productSet"]["product"]["variants"]["edges"]]
     return product_id, inventory_items
 
-def update_product_category(product_id):
-    query = """
-    mutation productUpdate($product: ProductUpdateInput!) {
-      productUpdate(product: $product) {
-        product { id }
-        userErrors { field message }
-      }
-    }
-    """
-    payload = {"query": query, "variables": {"product": {"id": product_id, "category": PRODUCT_CATEGORY_ID}}}
-    requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
-
-def enable_inventory_tracking(inventory_item_ids):
-    query = """
-    mutation inventoryItemUpdate($id: ID!, $input: InventoryItemInput!) {
-      inventoryItemUpdate(id: $id, input: $input) {
-        inventoryItem { id tracked }
-        userErrors { field message }
-      }
-    }
-    """
-    for item_id in inventory_item_ids:
-        payload = {"query": query, "variables": {"id": item_id, "input": {"tracked": True}}}
-        requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
-
-def activate_inventory(inventory_item_ids):
-    query = """
-    mutation inventoryActivate($inventoryItemId: ID!, $locationId: ID!) {
-      inventoryActivate(inventoryItemId: $inventoryItemId, locationId: $locationId) {
-        userErrors { field message }
-      }
-    }
-    """
-    for item_id in inventory_item_ids:
-        payload = {"query": query, "variables": {"inventoryItemId": item_id, "locationId": LOCATION_ID}}
-        requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
-
-def set_inventory_quantity(inventory_item_ids):
-    query = """
-    mutation inventorySetQuantities($input: InventorySetQuantitiesInput!) {
-      inventorySetQuantities(input: $input) {
-        userErrors { field message }
-      }
-    }
-    """
-    changes = [{"inventoryItemId": item_id, "locationId": LOCATION_ID, "quantity": DEFAULT_STOCK} for item_id in inventory_item_ids]
-    payload = {"query": query, "variables": {"input": {"name": "available", "reason": "correction", "ignoreCompareQuantity": True, "quantities": changes}}}
-    requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
-
-def upload_media(product_id, product_data):
-    query = """
-    mutation productCreateMedia($productId: ID!, $media: [CreateMediaInput!]!) {
-      productCreateMedia(productId: $productId, media: $media) {
-        media { id status }
-        userErrors { field message }
-      }
-    }
-    """
-    media_list = [{"originalSource": img["originalSource"], "mediaContentType": img["mediaContentType"], "alt": img.get("altText", "")} for img in product_data["images"]]
-    if not media_list:
-        return
-    payload = {"query": query, "variables": {"productId": product_id, "media": media_list}}
-    requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
-
 # -----------------------------------
 # 6. MAIN STREAMLIT APP
 # -----------------------------------
@@ -334,11 +273,6 @@ def main_app():
             if product_id:
                 publication_ids = get_publication_ids()
                 publish_product(product_id, publication_ids)
-                update_product_category(product_id)
-                enable_inventory_tracking(inventory_item_ids)
-                activate_inventory(inventory_item_ids)
-                set_inventory_quantity(inventory_item_ids)
-                upload_media(product_id, product_data)
                 st.success(f"Uploaded {product_data.get('title')} successfully!")
         else:
             st.info("Uploading Collection of Products...")
@@ -349,11 +283,6 @@ def main_app():
                 if product_id:
                     publication_ids = get_publication_ids()
                     publish_product(product_id, publication_ids)
-                    update_product_category(product_id)
-                    enable_inventory_tracking(inventory_item_ids)
-                    activate_inventory(inventory_item_ids)
-                    set_inventory_quantity(inventory_item_ids)
-                    upload_media(product_id, product_data)
                     st.success(f"Uploaded {product_data.get('title')} successfully!")
 
 # -----------------------------------
