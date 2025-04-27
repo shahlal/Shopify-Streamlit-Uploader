@@ -57,7 +57,7 @@ def generate_random_suffix(length=5):
     return ''.join(random.choices(string.ascii_lowercase + string.digits, k=length))
 
 def get_collections():
-    url = f"https://{SHOP_NAME}/admin/api/{API_VERSION}/custom_collections.json"
+    url = f"https://{SHOP_NAME}/admin/api/{API_VERSION}/custom_collections.json?limit=250"
     headers = {"X-Shopify-Access-Token": ACCESS_TOKEN, "Content-Type": "application/json"}
     response = requests.get(url, headers=headers, verify=False)
     collections = response.json().get("custom_collections", [])
@@ -108,6 +108,18 @@ def publish_product(product_id, publication_ids):
             }
         }
     }
+    requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
+
+def update_product_category(product_id):
+    query = """
+    mutation productUpdate($product: ProductUpdateInput!) {
+      productUpdate(product: $product) {
+        product { id }
+        userErrors { field message }
+      }
+    }
+    """
+    payload = {"query": query, "variables": {"product": {"id": product_id, "category": PRODUCT_CATEGORY_ID}}}
     requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
 
 # -----------------------------------
@@ -247,7 +259,7 @@ def create_product_with_variants(product_data):
     return product_id, inventory_items
 
 # -----------------------------------
-# 6. MAIN APP
+# 6. MAIN STREAMLIT APP
 # -----------------------------------
 
 def main_app():
@@ -271,10 +283,6 @@ def main_app():
             product_id, inventory_item_ids = create_product_with_variants(product_data)
             if product_id:
                 update_product_category(product_id)
-                enable_inventory_tracking(inventory_item_ids)
-                activate_inventory(inventory_item_ids)
-                set_inventory_quantity(inventory_item_ids)
-                upload_media(product_id, product_data)
                 publication_ids = get_publication_ids()
                 publish_product(product_id, publication_ids)
                 if selected_collections:
@@ -289,10 +297,6 @@ def main_app():
                 product_id, inventory_item_ids = create_product_with_variants(product_data)
                 if product_id:
                     update_product_category(product_id)
-                    enable_inventory_tracking(inventory_item_ids)
-                    activate_inventory(inventory_item_ids)
-                    set_inventory_quantity(inventory_item_ids)
-                    upload_media(product_id, product_data)
                     publication_ids = get_publication_ids()
                     publish_product(product_id, publication_ids)
                     if selected_collections:
