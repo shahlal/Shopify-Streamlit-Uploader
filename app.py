@@ -4,7 +4,7 @@ import json
 from bs4 import BeautifulSoup
 
 # -----------------------------------
-# 1. CONFIGURATION
+# CONFIGURATION
 # -----------------------------------
 
 VALID_USERNAME = "admin"
@@ -24,8 +24,14 @@ HEADERS = {
     "Content-Type": "application/json"
 }
 
+PRODUCT_TYPES = [
+    "Casual Pret", "Luxury Pret", "Formal", "Bridal", "Festive",
+    "Luxury Lawn", "Summer Lawn", "Winter Collection", "Eid Collection",
+    "Chiffon", "Silk", "Party Wear"
+]
+
 # -----------------------------------
-# 2. LOGIN SYSTEM
+# LOGIN SYSTEM
 # -----------------------------------
 
 if "logged_in" not in st.session_state:
@@ -48,385 +54,118 @@ def logout_button():
         st.experimental_rerun()
 
 # -----------------------------------
-# 3. SCRAPE FUNCTIONS
+# SCRAPE FUNCTIONS
 # -----------------------------------
 
-def scrape_collection(collection_url):
-    st.info(f"Scraping collection: {collection_url}")
-    headers_browser = {"User-Agent": "Mozilla/5.0"}
-    res = requests.get(collection_url, headers=headers_browser, verify=False)
+def scrape_collection(url):
+    res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, verify=False)
     res.raise_for_status()
     soup = BeautifulSoup(res.text, "html.parser")
-    domain = collection_url.split('/')[2]
-    product_urls = []
-    for link in soup.find_all('a', href=True):
-        href = link['href']
-        if "/products/" in href:
-            full_link = f"https://{domain}{href.split('?')[0]}"
-            if full_link not in product_urls:
-                product_urls.append(full_link)
-    st.success(f"Found {len(product_urls)} products.")
-    return product_urls
+    domain = url.split('/')[2]
+    links = soup.select("a[href*='/products/']")
+    return list({f"https://{domain}{link['href'].split('?')[0]}" for link in links})
 
-def scrape_product(product_url):
-    st.info(f"Scraping product: {product_url}")
-    headers_browser = {"User-Agent": "Mozilla/5.0"}
-    res = requests.get(product_url, headers=headers_browser, verify=False)
+def scrape_product(url):
+    res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, verify=False)
     res.raise_for_status()
     soup = BeautifulSoup(res.text, "html.parser")
     script = soup.find("script", type="application/ld+json")
-    data = json.loads(script.string) if script and script.string else {}
+    data = json.loads(script.string) if script else {}
 
-    title = data.get("name", "No Title Found")
-    description = data.get("description", "No Description Found")
+    title = data.get("name", "No Title")
+    description = data.get("description", "")
     images = data.get("image", [])
-    if isinstance(images, str):
-        images = [images]
+    images = images if isinstance(images, list) else [images]
 
-    handle = product_url.split("/products/")[-1].split("?")[0]
-    domain = product_url.split('/')[2]
+    handle = url.split("/products/")[-1].split("?")[0]
+    domain = url.split('/')[2]
+    variant_res = requests.get(f"https://{domain}/products/{handle}.js", verify=False).json()
 
-    variant_url = f"https://{domain}/products/{handle}.js"
-    variants = []
-    try:
-        variant_res = requests.get(variant_url, headers=headers_browser, verify=False)
-        variant_res.raise_for_status()
-        variant_json = variant_res.json()
-        for variant in variant_json.get("variants", []):
-            size_label = variant.get("public_title") or variant.get("title") or "Default Title"
-            price = str(float(variant["price"]) / 100)
-            compare_at_price = str(float(variant["compare_at_price"]) / 100) if variant.get("compare_at_price") else None
-            variants.append({
-                "size": size_label,
-                "price": price,
-                "compareAtPrice": compare_at_price,
-                "sku": variant.get("sku", "")
-            })
-    except Exception:
-        st.warning(f"Failed to get variant info from {variant_url}")
+    variants = [{
+        "size": v["public_title"] or v["title"],
+        "price": str(float(v["price"]) / 100),
+        "compareAtPrice": str(float(v["compare_at_price"]) / 100) if v.get("compare_at_price") else None,
+        "sku": v.get("sku", "")
+    } for v in variant_res.get("variants", [])]
 
-    images_clean = [{
+    images_data = [{
         "originalSource": img,
-        "altText": f"{title} Image {idx + 1}",
+        "altText": f"{title} image {idx + 1}",
         "mediaContentType": "IMAGE"
     } for idx, img in enumerate(images)]
 
     return {
-        "handle": handle,
-        "title": title,
-        "body_html": description,
+        "handle": handle, "title": title, "body_html": description,
         "vendor": domain.split('.')[0].capitalize(),
-        "productType": "Casual Pret",
-        "variants": variants,
-        "images": images_clean
+        "variants": variants, "images": images_data
     }
 
-# 📦 Fetch Shopify Collections (MANUAL ONLY)
+# -----------------------------------
+# FETCH SHOPIFY DATA
+# -----------------------------------
+
 def fetch_collections_and_tags():
     query = """
     {
       collections(first: 100) {
         edges {
-          node { 
-            id 
-            title
-            ruleSet {
-              rules {
-                column
-              }
-            }
-          }
+          node { id title ruleSet { rules { column } } }
         }
       }
-      shop {
-        productTags(first: 250) {
-          edges {
-            node
-          }
-        }
-      }
-    }
-    """
-
-    response = requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json={"query": query}, verify=False)
-    response_json = response.json()
-
-    if "data" not in response_json:
-        st.error(f"Shopify API error: {response_json}")
-        return [], []
-
-    collections = response_json["data"]["collections"]["edges"]
-    tags = response_json["data"]["shop"]["productTags"]["edges"]
-
-    manual_collections = [
-        c for c in collections 
-        if not c["node"].get("ruleSet") or not c["node"]["ruleSet"].get("rules")
-    ]
-
-    tag_list = sorted(tag["node"] for tag in tags)
-
-    return manual_collections, tag_list
-
+      shop { productTags(first: 250) { edges { node } } }
+    }"""
+    res = requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json={"query": query}, verify=False).json()
+    collections = [c["node"] for c in res["data"]["collections"]["edges"] if not c["node"]["ruleSet"]]
+    tags = sorted([t["node"] for t in res["data"]["shop"]["productTags"]["edges"]])
+    return collections, tags
 
 # -----------------------------------
-# 4. SHOPIFY UPLOAD FUNCTIONS
+# SHOPIFY UPLOAD FUNCTIONS
 # -----------------------------------
 
-def create_product_with_variants(product_data):
+def create_shopify_product(data, product_type, tags):
     query = """
     mutation productSet($product: ProductSetInput!) {
       productSet(input: $product) {
-        product {
-          id
-          variants(first: 50) {
-            edges {
-              node {
-                id
-                inventoryItem {
-                  id
-                }
-              }
-            }
-          }
-        }
-        userErrors {
-          field
-          message
-        }
+        product { id variants(first:10){edges{node{id inventoryItem{id}}}} }
+        userErrors { field message }
       }
-    }
-    """
-    sizes = list({v["size"] for v in product_data["variants"]})
+    }"""
     product_input = {
-        "title": product_data["title"],
-        "handle": product_data["handle"],
-        "descriptionHtml": product_data["body_html"],
-        "vendor": product_data["vendor"],
-        "productType": product_data["productType"],
-        "tags": product_data.get("tags", []),  # Include tags here
-        "productOptions": [{"name": "Size", "position": 1, "values": [{"name": s} for s in sizes]}],
-        "variants": []
+        "title": data["title"], "handle": data["handle"],
+        "descriptionHtml": data["body_html"], "vendor": data["vendor"],
+        "productType": product_type, "tags": tags,
+        "productOptions": [{"name": "Size", "position": 1, "values": [{"name": v["size"]} for v in data["variants"]]}],
+        "variants": [{"price": v["price"], "optionValues": [{"optionName": "Size", "name": v["size"]}], "sku": v["sku"], "compareAtPrice": v["compareAtPrice"]} for v in data["variants"]]
     }
-    for v in product_data["variants"]:
-        entry = {
-            "price": v["price"],
-            "optionValues": [{"optionName": "Size", "name": v["size"]}]
-        }
-        if v["compareAtPrice"]:
-            entry["compareAtPrice"] = v["compareAtPrice"]
-        if v["sku"]:
-            entry["sku"] = v["sku"]
-        product_input["variants"].append(entry)
-
-    payload = {"query": query, "variables": {"product": product_input}}
-    response = requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
-    data = response.json()
-
-    if data.get("errors") or data["data"]["productSet"]["userErrors"]:
-        st.error(f"Error creating product: {data}")
-        return None, []
-
-    product_id = data["data"]["productSet"]["product"]["id"]
-    inventory_items = [edge["node"]["inventoryItem"]["id"] for edge in data["data"]["productSet"]["product"]["variants"]["edges"]]
-    return product_id, inventory_items
-
-
-def update_product_category(product_id):
-    query = """
-    mutation productUpdate($product: ProductUpdateInput!) {
-      productUpdate(product: $product) {
-        product { id }
-        userErrors { field message }
-      }
-    }
-    """
-    payload = {"query": query, "variables": {"product": {"id": product_id, "category": PRODUCT_CATEGORY_ID}}}
-    requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
-
-def enable_inventory_tracking(inventory_item_ids):
-    query = """
-    mutation inventoryItemUpdate($id: ID!, $input: InventoryItemInput!) {
-      inventoryItemUpdate(id: $id, input: $input) {
-        inventoryItem { id tracked }
-        userErrors { field message }
-      }
-    }
-    """
-    for item_id in inventory_item_ids:
-        payload = {"query": query, "variables": {"id": item_id, "input": {"tracked": True}}}
-        requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
-
-def activate_inventory(inventory_item_ids):
-    query = """
-    mutation inventoryActivate($inventoryItemId: ID!, $locationId: ID!) {
-      inventoryActivate(inventoryItemId: $inventoryItemId, locationId: $locationId) {
-        userErrors { field message }
-      }
-    }
-    """
-    for item_id in inventory_item_ids:
-        payload = {"query": query, "variables": {"inventoryItemId": item_id, "locationId": LOCATION_ID}}
-        requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
-
-def set_inventory_quantity(inventory_item_ids):
-    query = """
-    mutation inventorySetQuantities($input: InventorySetQuantitiesInput!) {
-      inventorySetQuantities(input: $input) {
-        userErrors { field message }
-      }
-    }
-    """
-    changes = [{"inventoryItemId": item_id, "locationId": LOCATION_ID, "quantity": DEFAULT_STOCK} for item_id in inventory_item_ids]
-    payload = {"query": query, "variables": {"input": {"name": "available", "reason": "correction", "ignoreCompareQuantity": True, "quantities": changes}}}
-    requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
-
-def upload_media(product_id, product_data):
-    query = """
-    mutation productCreateMedia($productId: ID!, $media: [CreateMediaInput!]!) {
-      productCreateMedia(productId: $productId, media: $media) {
-        media { id status }
-        userErrors { field message }
-      }
-    }
-    """
-    media_list = [{"originalSource": img["originalSource"], "mediaContentType": img["mediaContentType"], "alt": img.get("altText", "")} for img in product_data["images"]]
-    if not media_list:
-        return
-    payload = {"query": query, "variables": {"productId": product_id, "media": media_list}}
-    requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
-
-# 📋 SALES CHANNELS - New
-
-def get_publication_ids():
-    query = """
-    {
-      publications(first: 20) {
-        edges {
-          node {
-            id
-          }
-        }
-      }
-    }
-    """
-    response = requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json={"query": query}, verify=False)
-    return [edge["node"]["id"] for edge in response.json()["data"]["publications"]["edges"]]
-
-def publish_product(product_id, publication_ids):
-    query = """
-    mutation PublishProduct($input: ProductPublishInput!) {
-      productPublish(input: $input) {
-        product {
-          id
-        }
-        userErrors {
-          field
-          message
-        }
-      }
-    }
-    """
-    payload = {
-        "query": query,
-        "variables": {
-            "input": {
-                "id": product_id,
-                "productPublications": [{"publicationId": pub_id} for pub_id in publication_ids]
-            }
-        }
-    }
-    requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
+    res = requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json={"query": query, "variables": {"product": product_input}}, verify=False).json()
+    return res
 
 # -----------------------------------
-# 6. STREAMLIT MAIN APP
+# STREAMLIT MAIN APP
 # -----------------------------------
-def add_product_to_collections(product_id, collection_ids):
-    query = """
-    mutation collectionAddProducts($id: ID!, $productIds: [ID!]!) {
-        collectionAddProducts(id: $id, productIds: $productIds) {
-            collection {
-                id
-            }
-            userErrors {
-                field
-                message
-            }
-        }
-    }
-    """
-    for collection_id in collection_ids:
-        payload = {
-            "query": query,
-            "variables": {"id": collection_id, "productIds": [product_id]}
-        }
-        response = requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
-        result = response.json()
-        if result.get("errors") or result["data"]["collectionAddProducts"]["userErrors"]:
-            st.warning(f"Error adding to collection {collection_id}: {result}")
 
 def main_app():
     st.title("🚀 Shopify Uploader")
-
-    input_url = st.text_input("Enter Product or Collection URL:")
-
-    # Fetch manual collections and tags for selection
+    url = st.text_input("Enter Product or Collection URL:")
     collections, tags = fetch_collections_and_tags()
 
-    collection_options = {col["node"]["title"]: col["node"]["id"] for col in collections}
-    selected_collections = st.multiselect("Select Collections to Assign:", options=collection_options.keys())
+    selected_collections = st.multiselect("Collections:", [c["title"] for c in collections])
+    selected_tags = st.multiselect("Tags:", tags)
+    product_type = st.selectbox("Product Type:", PRODUCT_TYPES)
 
-    selected_tags = st.multiselect("Select Tags to Assign:", options=tags)
-
-    if st.button("Run Upload"):
-        if not input_url:
-            st.warning("Please enter a URL.")
-            return
-
-        collection_ids = [collection_options[name] for name in selected_collections]
-
-        if "/products/" in input_url:
-            st.info("Single Product Mode")
-            product_data = scrape_product(input_url)
-
-            # Add selected tags to product
-            product_data["tags"] = selected_tags
-
-            product_id, inventory_item_ids = create_product_with_variants(product_data)
-            if product_id:
-                update_product_category(product_id)
-                enable_inventory_tracking(inventory_item_ids)
-                activate_inventory(inventory_item_ids)
-                set_inventory_quantity(inventory_item_ids)
-                upload_media(product_id, product_data)
-                publication_ids = get_publication_ids()
-                publish_product(product_id, publication_ids)
-                add_product_to_collections(product_id, collection_ids)
-                st.success(f"Uploaded {product_data.get('title')} successfully!")
-        else:
-            st.info("Collection Mode")
-            product_urls = scrape_collection(input_url)
-            for url in product_urls:
-                product_data = scrape_product(url)
-                
-                # Add selected tags to product
-                product_data["tags"] = selected_tags
-
-                product_id, inventory_item_ids = create_product_with_variants(product_data)
-                if product_id:
-                    update_product_category(product_id)
-                    enable_inventory_tracking(inventory_item_ids)
-                    activate_inventory(inventory_item_ids)
-                    set_inventory_quantity(inventory_item_ids)
-                    upload_media(product_id, product_data)
-                    publication_ids = get_publication_ids()
-                    publish_product(product_id, publication_ids)
-                    add_product_to_collections(product_id, collection_ids)
-                    st.success(f"Uploaded {product_data.get('title')} successfully!")
-
-
+    if st.button("Upload"):
+        urls = [url] if "/products/" in url else scrape_collection(url)
+        for product_url in urls:
+            product = scrape_product(product_url)
+            response = create_shopify_product(product, product_type, selected_tags)
+            if "errors" in response or response["data"]["productSet"]["userErrors"]:
+                st.error(f"Error: {response}")
+                continue
+            st.success(f"{product['title']} uploaded successfully!")
 
 # -----------------------------------
-# 7. ENTRY POINT
+# ENTRY POINT
 # -----------------------------------
 
 def run():
