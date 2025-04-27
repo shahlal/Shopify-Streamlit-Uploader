@@ -121,11 +121,11 @@ def scrape_product(product_url):
         "images": images_clean
     }
 
-# 📦 Fetch Shopify Collections
+# 📦 Fetch Shopify Collections (MANUAL ONLY)
 def fetch_collections():
     query = """
     {
-      collections(first: 100) {
+      collections(first: 100, query:"collection_type:manual") {
         edges {
           node { id title }
         }
@@ -134,6 +134,7 @@ def fetch_collections():
     """
     response = requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json={"query": query}, verify=False)
     return response.json()["data"]["collections"]["edges"]
+
 
 # -----------------------------------
 # 4. SHOPIFY UPLOAD FUNCTIONS
