@@ -131,7 +131,6 @@ def scrape_product(product_url):
     res = requests.get(product_url, headers=headers_browser, verify=False)
     res.raise_for_status()
     soup = BeautifulSoup(res.text, "html.parser")
-
     script = soup.find("script", type="application/ld+json")
     data = json.loads(script.string) if script and script.string else {}
 
@@ -181,7 +180,7 @@ def scrape_product(product_url):
     }
 
 # -----------------------------------
-# 5. SHOPIFY UPLOAD FUNCTIONS
+# 5. PRODUCT CREATION
 # -----------------------------------
 
 def create_product_with_variants(product_data):
@@ -215,9 +214,9 @@ def create_product_with_variants(product_data):
         "descriptionHtml": product_data["body_html"],
         "vendor": product_data["vendor"],
         "productType": product_data["productType"],
+        "status": "ACTIVE",
         "productOptions": [{"name": "Size", "position": 1, "values": [{"name": s} for s in sizes]}],
-        "variants": [],
-        "status": "ACTIVE"  # Publish product immediately
+        "variants": []
     }
 
     for v in product_data["variants"]:
@@ -258,9 +257,9 @@ def upload_media(product_id, product_data):
     }
     """
     media_list = [{
-        "originalSource": img["originalSource"],
-        "mediaContentType": img["mediaContentType"],
-        "alt": img.get("altText", "")
+        "originalSource": img,
+        "mediaContentType": "IMAGE",
+        "alt": img
     } for img in product_data["images"]]
 
     if not media_list:
@@ -270,12 +269,12 @@ def upload_media(product_id, product_data):
     requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False)
 
 # -----------------------------------
-# 6. MAIN STREAMLIT APP
+# 6. STREAMLIT APP
 # -----------------------------------
 
 def main_app():
     st.title("🚀 Shopify Product Uploader")
-    st.write("Paste a **Product URL** or a **Collection URL** to scrape and upload to Shopify.")
+    st.write("Paste a **Product URL** or **Collection URL** to scrape and upload.")
 
     input_url = st.text_input("Enter Product or Collection URL:")
     if st.button("Run Upload"):
@@ -293,7 +292,7 @@ def main_app():
                 upload_media(product_id, product_data)
                 st.success(f"Uploaded {product_data.get('title')} successfully!")
         else:
-            st.info("Uploading Collection of Products...")
+            st.info("Uploading Collection...")
             product_urls = scrape_collection(input_url)
             for url in product_urls:
                 product_data = scrape_product(url)
