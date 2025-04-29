@@ -4,11 +4,11 @@ import json
 from bs4 import BeautifulSoup
 from openai import OpenAI  # Correct for openai >=1.0.0
 
+
 # -----------------------------------
 # 1. CONFIGURATION
 # -----------------------------------
-
-        
+ 
 VALID_USERNAME    = "admin"
 VALID_PASSWORD    = "abc123"
 SHOP_NAME         = "kinzav2.myshopify.com"
@@ -31,21 +31,8 @@ DISCLAIMER_PAGE_GLOBAL_ID = "gid://shopify/OnlineStorePage/127935152446"
 # -----------------------------------
 # 2. LOGIN
 # -----------------------------------
-def run():
-    # Load secrets inside run()
-    ACCESS_TOKEN = st.secrets["SHOPIFY_ACCESS_TOKEN"]
-    openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
-    GRAPHQL_ENDPOINT = f"https://{SHOP_NAME}/admin/api/{API_VERSION}/graphql.json"
-    HEADERS = {
-        "X-Shopify-Access-Token": ACCESS_TOKEN,
-        "Content-Type": "application/json"
-    }
 
-    if not st.session_state.logged_in:
-        login_screen()
-    else:
-        logout_button()
-        main_app()
+# Initialise session state first
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
@@ -64,6 +51,22 @@ def logout_button():
     if st.button("Logout"):
         st.session_state.logged_in = False
         st.experimental_rerun()
+
+def run():
+    # Load secrets inside run()
+    ACCESS_TOKEN = st.secrets["SHOPIFY_ACCESS_TOKEN"]
+    openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+    GRAPHQL_ENDPOINT = f"https://{SHOP_NAME}/admin/api/{API_VERSION}/graphql.json"
+    HEADERS = {
+        "X-Shopify-Access-Token": ACCESS_TOKEN,
+        "Content-Type": "application/json"
+    }
+
+    if not st.session_state.logged_in:
+        login_screen()
+    else:
+        logout_button()
+        main_app()
 
 # -----------------------------------
 # 3. SCRAPING COLLECTION / PRODUCT
@@ -147,8 +150,8 @@ def scrape_product(url):
                 "compareAtPrice": compare_at_price,
                 "sku": v.get("sku", "")
             })
-    except Exception:
-        st.warning("Failed to fetch variant info")
+    except Exception as e:
+        st.warning(f"Failed to fetch variant info: {e}")
 
     descriptors = [
         "front view", "back view", "side angle", "close-up detail",
@@ -216,11 +219,13 @@ def fetch_collections_and_tags():
     
     cols = resp["data"]["collections"]["edges"]
     # A "manual" collection has no rules
-    manual = [c for c in cols if not (c["node"].get("ruleSet") or {}).get("rules")]
+    manual_collections = [c for c in cols if not (c["node"].get("ruleSet") or {}).get("rules")]
 
     tag_edges = resp["data"]["shop"]["productTags"]["edges"]
-    tag_list  = sorted(t["node"] for t in tag_edges)
-    return manual, tag_list
+    tag_list = sorted(t["node"] for t in tag_edges)
+
+    return manual_collections, tag_list
+
 
 # -----------------------------------
 # 4b. FETCH & FILTER PAGES (GRAPHQL)
@@ -270,7 +275,7 @@ def create_product_with_variants(product_data):
       productSet(input: $product) {
         product {
           id
-          variants(first:50) {
+          variants(first: 50) {
             edges {
               node {
                 id
@@ -291,17 +296,17 @@ def create_product_with_variants(product_data):
 
     sizes = list({v["size"] for v in product_data["variants"]})
     product_input = {
-        "title":             product_data["title"],
-        "handle":            product_data["handle"],
-        "descriptionHtml":   product_data.get("enhanced_description", product_data["raw_description"]),  # ✅ Use GPT-enhanced description if available
-        "vendor":            product_data["vendor"],
-        "productType":       product_data["productType"],
-        "tags":              product_data.get("tags", []),
+        "title": product_data["title"],
+        "handle": product_data["handle"],
+        "descriptionHtml": product_data.get("enhanced_description", product_data["raw_description"]),
+        "vendor": product_data["vendor"],
+        "productType": product_data["productType"],
+        "tags": product_data.get("tags", []),
         "productOptions": [
             {
                 "name": "Size",
                 "position": 1,
-                "values": [{"name": s} for s in sizes]
+                "values": [{"name": size} for size in sizes]
             }
         ],
         "variants": []
@@ -312,9 +317,9 @@ def create_product_with_variants(product_data):
             "price": v["price"],
             "optionValues": [{"optionName": "Size", "name": v["size"]}]
         }
-        if v["compareAtPrice"]:
+        if v.get("compareAtPrice"):
             variant_entry["compareAtPrice"] = v["compareAtPrice"]
-        if v["sku"]:
+        if v.get("sku"):
             variant_entry["sku"] = v["sku"]
         product_input["variants"].append(variant_entry)
 
@@ -322,11 +327,11 @@ def create_product_with_variants(product_data):
     response = requests.post(GRAPHQL_ENDPOINT, headers=HEADERS, json=payload, verify=False).json()
 
     product_set = response.get("data", {}).get("productSet", {})
-    errors      = product_set.get("userErrors", [])
+    user_errors = product_set.get("userErrors", [])
     product_obj = product_set.get("product")
 
-    if errors:
-        st.error(f"Create product errors: {errors}")
+    if user_errors:
+        st.error(f"Create product errors: {user_errors}")
         return None, []
 
     if not product_obj or not product_obj.get("id"):
@@ -334,9 +339,9 @@ def create_product_with_variants(product_data):
         return None, []
 
     product_id = product_obj["id"]
-    inv_ids = [edge["node"]["inventoryItem"]["id"] for edge in product_obj["variants"]["edges"]]
-    return product_id, inv_ids
+    inventory_ids = [edge["node"]["inventoryItem"]["id"] for edge in product_obj["variants"]["edges"]]
 
+    return product_id, inventory_ids
 
 # -----------------------------------
 # 6. COMMON GRAPHQL + METAFIELD UPDATES
@@ -778,5 +783,4 @@ def run():
         logout_button()
         main_app()
 
-if __name__ == "__main__":
     run()
