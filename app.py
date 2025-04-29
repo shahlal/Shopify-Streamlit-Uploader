@@ -50,14 +50,14 @@ def login_screen():
     if st.button("Login"):
         if u == VALID_USERNAME and p == VALID_PASSWORD:
             st.session_state.logged_in = True
-            st.experimental_rerun()
+            st.rerun()
         else:
             st.error("Invalid credentials")
 
 def logout_button():
     if st.button("Logout"):
         st.session_state.logged_in = False
-        st.experimental_rerun()
+        st.rerun()
 
 # -----------------------------------
 # 3. SCRAPING COLLECTION / PRODUCT
