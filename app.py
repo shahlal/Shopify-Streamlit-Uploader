@@ -754,7 +754,7 @@ def main_app():
             set_inventory_quantity(inv_ids)
             upload_media(product_id, p_data)
             # publish_product(product_id, get_publication_ids())  # ← commented out to keep as Draft
-        add_product_to_collections(product_id, coll_ids)
+            add_product_to_collections(product_id, coll_ids)
 
             
 
