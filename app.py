@@ -590,8 +590,9 @@ def get_navigation_links():
     collections, products = filter_urls(sitemap_urls)
     return collections, products
 
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+
 def enhance_description_via_gpt(raw_description, product_title, vendor, product_type, categories, related_products, collection, collection_urls, product_urls):
-    client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
     shop_by_designer_link = next(
         (u for u in collection_urls if vendor.lower() in u.lower()), '/collections/all'
@@ -608,18 +609,14 @@ def enhance_description_via_gpt(raw_description, product_title, vendor, product_
     ]
 
     prompt = f"""
-You are a professional fashion content writer for "Signature Labels". Write a structured Shopify product description entirely in HTML format as detailed below. 
+You are a professional fashion content writer for "Signature Labels". Write a structured Shopify product description entirely in HTML format.
 
 Important Instructions:
-- Do NOT include Markdown code blocks such as 
-html or
- at the start or end of your response.
-- Output ONLY the HTML content directly, ready to copy-and-paste into Shopify.
-
-Structure the description as follows:
+- Do NOT include Markdown code blocks at the start or end.
+- Output ONLY HTML directly, ready for Shopify.
 
 <!-- Product Description -->
-<p>[Detailed introduction about {product_title} by {vendor}. Mention the collection, fabric details, embroidery, and style specifics.]</p>
+<p>[Detailed introduction about {product_title} by {vendor}. Include collection, fabric details, embroidery, and style specifics.]</p>
 
 <!-- Product Specifications -->
 <ul>
@@ -661,17 +658,13 @@ Structure the description as follows:
     <p>[Designer description]</p>
 </section>
 
-Use these details explicitly:
-
+Explicitly use these details:
 - Title: {product_title}
 - Vendor: {vendor}
 - Type: {product_type}
 - Collection: {collection}
 - Raw Description: {raw_description}
-
-Ensure the final output is strictly HTML content without additional markup or code block wrappers.
 """
-
 
     completion = client.chat.completions.create(
         model="gpt-4o",
@@ -692,16 +685,14 @@ def main_app():
     ]
 
     sel_type = st.selectbox("Select Product Type:", TYPES)
-
     url = st.text_input("Enter Product or Collection URL:")
 
     collections, tags = fetch_collections_and_tags()
     delivery_pages, size_pages = fetch_and_filter_pages()
 
     coll_dict = {c["node"]["title"]: c["node"]["id"] for c in collections}
-    sel_coll = st.multiselect("Select Collections to Assign:", list(coll_dict.keys()))
-
-    sel_tags = st.multiselect("Select Tags to Assign:", tags)
+    sel_coll = st.multiselect("Select Collections:", list(coll_dict.keys()))
+    sel_tags = st.multiselect("Select Tags:", tags)
 
     del_dict = {p["title"]: p["id"] for p in delivery_pages}
     siz_dict = {p["title"]: p["id"] for p in size_pages}
@@ -709,23 +700,23 @@ def main_app():
     del_choice = st.selectbox("Select Delivery Page:", ["-- None --"] + list(del_dict.keys()))
     siz_choice = st.selectbox("Select Size Chart Page:", ["-- None --"] + list(siz_dict.keys()))
 
-    categories_input = st.text_input("Enter Categories (comma-separated):", "Luxury Pret, Festive")
-    related_products_input = st.text_input("Enter Related Products (comma-separated):", "Ivory Embroidered Shirt Set, Pastel Embroidered Kurta Set")
-    collection = st.text_input("Enter Collection Name:", "Eid Collection")
+    categories_input = st.text_input("Categories (comma-separated):", "Luxury Pret, Festive")
+    related_products_input = st.text_input("Related Products (comma-separated):", "Ivory Embroidered Shirt Set, Pastel Embroidered Kurta Set")
+    collection = st.text_input("Collection Name:", "Eid Collection")
 
     if st.button("Run Upload"):
         if not url:
-            return st.warning("Please enter a URL.")
+            st.warning("Please enter a URL.")
+            return
 
         coll_ids = [coll_dict[cname] for cname in sel_coll]
         del_id = del_dict.get(del_choice) if del_choice != "-- None --" else None
         siz_id = siz_dict.get(siz_choice) if siz_choice != "-- None --" else None
 
+        collection_urls, product_urls = get_navigation_links()
+
         def process_one(product_url):
             p_data = scrape_product(product_url)
-
-            collection_urls, product_urls = get_navigation_links()
-
             category_list = [cat.strip() for cat in categories_input.split(",") if cat.strip()]
             related_product_list = [rp.strip() for rp in related_products_input.split(",") if rp.strip()]
 
@@ -756,7 +747,7 @@ def main_app():
             activate_inventory(inv_ids)
             set_inventory_quantity(inv_ids)
             upload_media(product_id, p_data)
-            publish_product(product_id, get_publication_ids())
+            # Product left as Draft by default
             add_product_to_collections(product_id, coll_ids)
 
             st.success(f"Uploaded: {p_data['title']}")
@@ -769,7 +760,6 @@ def main_app():
             product_urls = scrape_collection(url)
             for p_url in product_urls:
                 process_one(p_url)
-
 
 # -----------------------------------
 # 8. ENTRY POINT
