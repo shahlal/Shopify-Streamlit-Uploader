@@ -575,7 +575,7 @@ def add_product_to_collections(product_id, coll_ids):
 def fetch_sitemap(sitemap_url):
     res = requests.get(sitemap_url)
     res.raise_for_status()
-    soup = BeautifulSoup(res.text, "xml")
+    soup = BeautifulSoup(res.text, "lxml-xml")
     urls = [loc.text for loc in soup.find_all('loc')]
     return urls
 
