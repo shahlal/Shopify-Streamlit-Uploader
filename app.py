@@ -8,6 +8,7 @@ from openai import OpenAI  # Correct for openai >=1.0.0
 # 1. CONFIGURATION
 # -----------------------------------
 
+        
 VALID_USERNAME    = "admin"
 VALID_PASSWORD    = "abc123"
 SHOP_NAME         = "kinzav2.myshopify.com"
@@ -30,7 +31,21 @@ DISCLAIMER_PAGE_GLOBAL_ID = "gid://shopify/OnlineStorePage/127935152446"
 # -----------------------------------
 # 2. LOGIN
 # -----------------------------------
+def run():
+    # Load secrets inside run()
+    ACCESS_TOKEN = st.secrets["SHOPIFY_ACCESS_TOKEN"]
+    openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+    GRAPHQL_ENDPOINT = f"https://{SHOP_NAME}/admin/api/{API_VERSION}/graphql.json"
+    HEADERS = {
+        "X-Shopify-Access-Token": ACCESS_TOKEN,
+        "Content-Type": "application/json"
+    }
 
+    if not st.session_state.logged_in:
+        login_screen()
+    else:
+        logout_button()
+        main_app()
 if "logged_in" not in st.session_state:
     st.session_state.logged_in = False
 
