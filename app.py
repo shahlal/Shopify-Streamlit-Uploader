@@ -745,7 +745,6 @@ def main_app():
             product_id, inv_ids = create_product_with_variants(p_data)
             if not product_id:
                 return
-
             update_product_category(product_id)
             update_faqs_metafield(product_id)
             update_we_care_and_disclaimer(product_id)
@@ -754,8 +753,10 @@ def main_app():
             activate_inventory(inv_ids)
             set_inventory_quantity(inv_ids)
             upload_media(product_id, p_data)
-            publish_product(product_id, get_publication_ids())
-            add_product_to_collections(product_id, coll_ids)
+            # publish_product(product_id, get_publication_ids())  # ← commented out to keep as Draft
+        add_product_to_collections(product_id, coll_ids)
+
+            
 
             st.success(f"Uploaded: {p_data['title']}")
 
