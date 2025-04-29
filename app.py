@@ -11,29 +11,20 @@ from openai import OpenAI  # Correct for openai >=1.0.0
 VALID_USERNAME    = "admin"
 VALID_PASSWORD    = "abc123"
 SHOP_NAME         = "kinzav2.myshopify.com"
-
-# Use a valid Shopify Admin API version (e.g. "2023-10" or "2024-01"):
 API_VERSION       = "2025-01"
-
-ACCESS_TOKEN      = st.secrets["SHOPIFY_ACCESS_TOKEN"]
-openai_client     = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])  # Correct OpenAI client initialization
 
 LOCATION_ID         = "gid://shopify/Location/91287421246"
 PRODUCT_CATEGORY_ID = "gid://shopify/TaxonomyCategory/aa-1-4"
 DEFAULT_STOCK       = 8
 
-# Hard-coded FAQ page reference
 FAQ_PAGE_GLOBAL_ID = "gid://shopify/OnlineStorePage/687485878651"
-
-# Hard-coded We Care and Disclaimer pages
 WE_CARE_PAGE_GLOBAL_ID = "gid://shopify/OnlineStorePage/127953174846"
 DISCLAIMER_PAGE_GLOBAL_ID = "gid://shopify/OnlineStorePage/127935152446"
 
-GRAPHQL_ENDPOINT  = f"https://{SHOP_NAME}/admin/api/{API_VERSION}/graphql.json"
-HEADERS           = {
-    "X-Shopify-Access-Token": ACCESS_TOKEN,
-    "Content-Type": "application/json"
-}
+# 🚫 DO NOT put ACCESS_TOKEN, openai_client, HEADERS here
+# they will be loaded later inside run()
+
+
 
 
 # -----------------------------------
