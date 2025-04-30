@@ -15,11 +15,7 @@ SHOP_NAME         = "kinzav2.myshopify.com"
 
 # Use a valid Shopify Admin API version (e.g. "2023-10" or "2024-01"):
 API_VERSION       = "2025-01"
-
-
 ACCESS_TOKEN = st.secrets["SHOPIFY_ACCESS_TOKEN"]
-
-
 LOCATION_ID         = "gid://shopify/Location/91287421246"
 PRODUCT_CATEGORY_ID = "gid://shopify/TaxonomyCategory/aa-1-4"
 DEFAULT_STOCK       = 8
