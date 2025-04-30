@@ -16,7 +16,9 @@ SHOP_NAME         = "kinzav2.myshopify.com"
 API_VERSION       = "2025-01"
 
 ACCESS_TOKEN      = st.secrets["SHOPIFY_ACCESS_TOKEN"]
-openai_client     = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])  # Correct OpenAI client initialization
+from openai import OpenAI
+
+openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"], http_client=None)
 
 LOCATION_ID         = "gid://shopify/Location/91287421246"
 PRODUCT_CATEGORY_ID = "gid://shopify/TaxonomyCategory/aa-1-4"
