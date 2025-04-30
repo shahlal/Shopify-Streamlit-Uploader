@@ -668,7 +668,7 @@ Explicitly use these details:
 - Raw Description: {raw_description}
 """
 
-    completion = openai.chat.completions.create(
+    completion = openai.ChatCompletion.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": prompt}],
         max_tokens=1500,
@@ -676,10 +676,8 @@ Explicitly use these details:
     )
 
     response_text = completion.choices[0].message.content.strip()
-    
-    return response_text  # ✅ Important return statement added here
 
-
+    return response_text
 
 
 
