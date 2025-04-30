@@ -15,7 +15,11 @@ SHOP_NAME         = "kinzav2.myshopify.com"
 
 # Use a valid Shopify Admin API version (e.g. "2023-10" or "2024-01"):
 API_VERSION       = "2025-01"
+
+
 ACCESS_TOKEN = st.secrets["SHOPIFY_ACCESS_TOKEN"]
+
+
 LOCATION_ID         = "gid://shopify/Location/91287421246"
 PRODUCT_CATEGORY_ID = "gid://shopify/TaxonomyCategory/aa-1-4"
 DEFAULT_STOCK       = 8
@@ -592,6 +596,11 @@ def get_navigation_links():
 
 
 
+from openai import OpenAI
+import streamlit as st
+
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+
 def enhance_description_via_gpt(raw_description, product_title, vendor, product_type, categories, related_products, collection, collection_urls, product_urls):
 
     shop_by_designer_link = next(
@@ -609,62 +618,55 @@ def enhance_description_via_gpt(raw_description, product_title, vendor, product_
     ]
 
     prompt = f"""
-You are a professional fashion content writer for "Signature Labels". Write a structured Shopify product description entirely in HTML format.
+    You are a professional fashion content writer for "Signature Labels". Write a structured Shopify product description entirely in HTML format.
 
-Important Instructions:
-- Do NOT include Markdown code blocks at the start or end.
-- Output ONLY HTML directly, ready for Shopify.
+    Important Instructions:
+    - Do NOT include Markdown code blocks at the start or end.
+    - Output ONLY HTML directly, ready for Shopify.
 
-<!-- Product Description -->
-<p>[Detailed introduction about {product_title} by {vendor}. Include collection, fabric details, embroidery, and style specifics.]</p>
+    <!-- Product Description -->
+    <p>[Detailed introduction about {product_title} by {vendor}. Include collection, fabric details, embroidery, and style specifics.]</p>
 
-<!-- Product Specifications -->
-<ul>
-    <li><strong>Outfit Type:</strong> Eastern Wear</li>
-    <li><strong>Collection:</strong> <a href="{shop_by_designer_link}">{collection}</a></li>
-    <li><strong>Brand:</strong> {vendor}</li>
-    <li><strong>Style:</strong> [Style details]</li>
-    <li><strong>Fabric:</strong> [Fabric details]</li>
-    <li><strong>Work Technique:</strong> [Techniques]</li>
-    <li><strong>Occasion:</strong> {product_type}, Casual Wear, Party Wear, Eid Outfits</li>
-    <li><strong>Package Includes:</strong> [Components]</li>
-</ul>
+    <!-- Product Specifications -->
+    <ul>
+        <li><strong>Outfit Type:</strong> Eastern Wear</li>
+        <li><strong>Collection:</strong> <a href="{shop_by_designer_link}">{collection}</a></li>
+        <li><strong>Brand:</strong> {vendor}</li>
+        <li><strong>Style:</strong> [Style details]</li>
+        <li><strong>Fabric:</strong> [Fabric details]</li>
+        <li><strong>Work Technique:</strong> [Techniques]</li>
+        <li><strong>Occasion:</strong> {product_type}, Casual Wear, Party Wear, Eid Outfits</li>
+        <li><strong>Package Includes:</strong> [Components]</li>
+    </ul>
 
-<!-- Note and Navigation -->
-<p><strong>Note:</strong> Colours may vary slightly due to lighting or screen resolution.</p>
-<p>
-    <strong>Shop by Designer:</strong> <a href="{shop_by_designer_link}">{vendor}</a><br>
-    <strong>Shop by Categories:</strong> {', '.join(f'<a href="{link}">{cat}</a>' for cat, link in zip(categories, category_links))}<br>
-    <strong>Related Products:</strong> {', '.join(f'<a href="{link}">{rp}</a>' for rp, link in zip(related_products, related_product_links))}
-</p>
+    <!-- Note and Navigation -->
+    <p><strong>Note:</strong> Colours may vary slightly due to lighting or screen resolution.</p>
+    <p>
+        <strong>Shop by Designer:</strong> <a href="{shop_by_designer_link}">{vendor}</a><br>
+        <strong>Shop by Categories:</strong> {', '.join(f'<a href="{link}">{cat}</a>' for cat, link in zip(categories, category_links))}<br>
+        <strong>Related Products:</strong> {', '.join(f'<a href="{link}">{rp}</a>' for rp, link in zip(related_products, related_product_links))}
+    </p>
 
-<!-- Why It Stands Out -->
-<h3>Why "{product_title}" Stands Out</h3>
-<ul>
-    <li>[Key feature 1]</li>
-    <li>[Key feature 2]</li>
-</ul>
+    <!-- Why It Stands Out -->
+    <h3>Why "{product_title}" Stands Out</h3>
+    <ul>
+        <li>[Key feature 1]</li>
+        <li>[Key feature 2]</li>
+    </ul>
 
-<!-- Key Benefits -->
-<h3>Key Benefits</h3>
-<ul>
-    <li>[Benefit 1]</li>
-    <li>[Benefit 2]</li>
-</ul>
+    <!-- Key Benefits -->
+    <h3>Key Benefits</h3>
+    <ul>
+        <li>[Benefit 1]</li>
+        <li>[Benefit 2]</li>
+    </ul>
 
-<!-- About {vendor} -->
-<section id="about-designer">
-    <h2>About {vendor}</h2>
-    <p>[Designer description]</p>
-</section>
-
-Explicitly use these details:
-- Title: {product_title}
-- Vendor: {vendor}
-- Type: {product_type}
-- Collection: {collection}
-- Raw Description: {raw_description}
-"""
+    <!-- About {vendor} -->
+    <section id="about-designer">
+        <h2>About {vendor}</h2>
+        <p>[Designer description]</p>
+    </section>
+    """
 
     completion = client.chat.completions.create(
         model="gpt-4o",
