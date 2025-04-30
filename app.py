@@ -2,7 +2,9 @@ import streamlit as st
 import requests
 import json
 from bs4 import BeautifulSoup
-import openai  # ✅ Only this line is needed for OpenAI integration
+from openai import OpenAI
+
+client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # -----------------------------------
 # 1. CONFIGURATION
@@ -15,9 +17,8 @@ SHOP_NAME         = "kinzav2.myshopify.com"
 # Use a valid Shopify Admin API version (e.g. "2023-10" or "2024-01"):
 API_VERSION       = "2025-01"
 
-ACCESS_TOKEN      = st.secrets["SHOPIFY_ACCESS_TOKEN"]
 
-openai.api_key = st.secrets["OPENAI_API_KEY"]
+ACCESS_TOKEN = st.secrets["SHOPIFY_ACCESS_TOKEN"]
 
 
 LOCATION_ID         = "gid://shopify/Location/91287421246"
@@ -668,14 +669,15 @@ Explicitly use these details:
 - Raw Description: {raw_description}
 """
 
-    completion = openai.ChatCompletion.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=1500,
-        temperature=0.7,
-    )
+    completion = client.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": prompt}],
+    max_tokens=1500,
+    temperature=0.7,
+)
 
-    return completion.choices[0].message.content.strip()
+return completion.choices[0].message.content.strip()
+
 
 
 def main_app():
