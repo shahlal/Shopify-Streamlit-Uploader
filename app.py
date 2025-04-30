@@ -2,7 +2,7 @@ import streamlit as st
 import requests
 import json
 from bs4 import BeautifulSoup
-from openai import OpenAI  # Correct for openai >=1.0.0
+import openai  # ✅ Only this line is needed for OpenAI integration
 
 # -----------------------------------
 # 1. CONFIGURATION
@@ -16,9 +16,12 @@ SHOP_NAME         = "kinzav2.myshopify.com"
 API_VERSION       = "2025-01"
 
 ACCESS_TOKEN      = st.secrets["SHOPIFY_ACCESS_TOKEN"]
-from openai import OpenAI
 
-openai_client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"], http_client=None)
+
+import openai
+
+openai.api_key = st.secrets["OPENAI_API_KEY"]
+
 
 LOCATION_ID         = "gid://shopify/Location/91287421246"
 PRODUCT_CATEGORY_ID = "gid://shopify/TaxonomyCategory/aa-1-4"
@@ -592,7 +595,7 @@ def get_navigation_links():
     collections, products = filter_urls(sitemap_urls)
     return collections, products
 
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+
 
 def enhance_description_via_gpt(raw_description, product_title, vendor, product_type, categories, related_products, collection, collection_urls, product_urls):
 
@@ -668,7 +671,7 @@ Explicitly use these details:
 - Raw Description: {raw_description}
 """
 
-    completion = client.chat.completions.create(
+    completion = openai.ChatCompletion.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": prompt}],
         max_tokens=1500,
@@ -676,6 +679,7 @@ Explicitly use these details:
     )
 
     return completion.choices[0].message.content.strip()
+
 
 def main_app():
     st.title("🚀 Shopify Uploader")
