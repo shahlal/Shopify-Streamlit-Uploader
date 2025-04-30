@@ -594,6 +594,8 @@ def get_navigation_links():
 
 
 
+
+
 def enhance_description_via_gpt(raw_description, product_title, vendor, product_type, categories, related_products, collection, collection_urls, product_urls):
 
     shop_by_designer_link = next(
@@ -668,7 +670,7 @@ Explicitly use these details:
 - Raw Description: {raw_description}
 """
 
-    completion = openai.ChatCompletion.create(
+    completion = client.chat.completions.create(
         model="gpt-4o",
         messages=[{"role": "user", "content": prompt}],
         max_tokens=1500,
