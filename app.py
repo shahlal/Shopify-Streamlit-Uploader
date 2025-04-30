@@ -2,9 +2,8 @@ import streamlit as st
 import requests
 import json
 from bs4 import BeautifulSoup
-from openai import OpenAI
-
-client = OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+import openai
+openai.api_key = st.secrets["OPENAI_API_KEY"]
 
 # -----------------------------------
 # 1. CONFIGURATION
@@ -669,14 +668,14 @@ Explicitly use these details:
 - Raw Description: {raw_description}
 """
 
-    completion = client.chat.completions.create(
-        model="gpt-4o",
-        messages=[{"role": "user", "content": prompt}],
-        max_tokens=1500,
-        temperature=0.7,
+        completion = openai.chat.completions.create(
+    model="gpt-4o",
+    messages=[{"role": "user", "content": "Your prompt here"}],
+    max_tokens=1500,
+    temperature=0.7,
     )
 
-    return completion.choices[0].message.content.strip()
+    response_text = completion.choices[0].message.content.strip()
 
 
 
