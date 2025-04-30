@@ -50,14 +50,14 @@ def login_screen():
     if st.button("Login"):
         if u == VALID_USERNAME and p == VALID_PASSWORD:
             st.session_state.logged_in = True
-            st.rerun()
+            st.experimental_rerun()
         else:
             st.error("Invalid credentials")
 
 def logout_button():
     if st.button("Logout"):
         st.session_state.logged_in = False
-        st.rerun()
+        st.experimental_rerun()
 
 # -----------------------------------
 # 3. SCRAPING COLLECTION / PRODUCT
@@ -747,7 +747,10 @@ def main_app():
             activate_inventory(inv_ids)
             set_inventory_quantity(inv_ids)
             upload_media(product_id, p_data)
-            # Product left as Draft by default
+
+            publication_ids = get_publication_ids()
+            publish_product(product_id, publication_ids)
+
             add_product_to_collections(product_id, coll_ids)
 
             st.success(f"Uploaded: {p_data['title']}")
@@ -760,7 +763,6 @@ def main_app():
             product_urls = scrape_collection(url)
             for p_url in product_urls:
                 process_one(p_url)
-
 # -----------------------------------
 # 8. ENTRY POINT
 # -----------------------------------
