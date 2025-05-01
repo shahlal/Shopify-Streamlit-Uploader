@@ -3,7 +3,10 @@ import requests
 import json
 from bs4 import BeautifulSoup
 import openai
+import math
+
 openai.api_key = st.secrets["OPENAI_API_KEY"]
+client = openai.OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
 
 # -----------------------------------
 # 1. CONFIGURATION
@@ -81,101 +84,104 @@ def scrape_collection(url):
     return product_urls
 
 # Dynamic Pricing Function (New!)
+
+
 def dynamic_pricing(original_price):
+    # 1) Determine your markup as before
     if original_price <= 100:
-        return original_price + 50
+        markup = 50
     elif 101 <= original_price <= 199:
-        return original_price + 65
+        markup = 65
     elif 200 <= original_price <= 299:
-        return original_price + 75
+        markup = 75
     else:  # original_price >= 300
-        return original_price + 100
+        markup = 100
+
+    # 2) Apply markup
+    new_price = original_price + markup
+
+    # 3) Round up to nearest £5
+    rounded_price = math.ceil(new_price / 5) * 5
+
+    return rounded_price
+
 
 def scrape_product(url):
     st.info(f"Scraping product: {url}")
     res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, verify=False)
     res.raise_for_status()
     soup = BeautifulSoup(res.text, "html.parser")
+
+    # ─── JSON-LD / metadata extraction ─────────────────────────────────────
     ld = soup.find("script", type="application/ld+json")
     data = json.loads(ld.string) if ld and ld.string else {}
 
-    title = data.get("name", "No Title")
+    title       = data.get("name", "No Title")
     description = data.get("description", "")
-    images = data.get("image", []) if data.get("image") else []
+    images      = data.get("image", []) or []
     if isinstance(images, str):
         images = [images]
-
     images = images[:10]
 
     handle = url.split("/products/")[-1].split("?")[0]
     vendor = url.split('/')[2].split('.')[0].capitalize()
 
+    # Build your formatted title
     coll_link = soup.find('a', href=lambda x: x and '/collections/' in x and '/products/' not in x)
-    coll_name = None
-    if coll_link:
-        txt = coll_link.get_text(strip=True)
-        if txt and txt.lower() not in ["all products", "all"]:
-            coll_name = txt
-
+    coll_name = (coll_link.get_text(strip=True) 
+                 if coll_link and coll_link.get_text(strip=True).lower() not in ["all products","all"]
+                 else None)
     formatted = f"{vendor} | {coll_name} | {title}" if coll_name else f"{vendor} | {title}"
 
+    # ─── VARIANTS ────────────────────────────────────────────────────────────
     variants = []
     try:
-        vres = requests.get(
-            f"https://{url.split('/')[2]}/products/{handle}.js",
-            headers={"User-Agent": "Mozilla/5.0"}, verify=False
-        )
-        vres.raise_for_status()
+        vres     = requests.get(f"https://{url.split('/')[2]}/products/{handle}.js",
+                                headers={"User-Agent": "Mozilla/5.0"}, verify=False)
         var_json = vres.json()
+
         for v in var_json.get("variants", []):
-            size_label = v.get("public_title") or v.get("title") or "Default"
-            
+            size_label     = v.get("public_title") or v.get("title") or "Default"
             original_price = float(v["price"]) / 100
             adjusted_price = dynamic_pricing(original_price)
 
-            compare_at_price = v.get("compare_at_price")
-            if compare_at_price:
-                compare_at_price = str(float(compare_at_price) / 100)
+            compare_at_price = (f"{float(v['compare_at_price'])/100:.2f}"
+                                if v.get("compare_at_price") else None)
 
             variants.append({
-                "size": size_label,
-                "price": f"{adjusted_price:.2f}",  # ✅ Dynamic pricing applied here
+                "size":           size_label,
+                "price":          f"{adjusted_price:.2f}",  # rounded to £5 increments
                 "compareAtPrice": compare_at_price,
-                "sku": v.get("sku", "")
+                "sku":            v.get("sku","")
             })
     except Exception:
         st.warning("Failed to fetch variant info")
 
+    # ─── IMAGES CLEANUP ──────────────────────────────────────────────────────
     descriptors = [
-        "front view", "back view", "side angle", "close-up detail",
-        "three-quarter view", "embroidery focus", "sleeves close-up",
-        "model styling view", "hemline detail", "final angle shot"
+        "front view","back view","side angle","close-up detail",
+        "three-quarter view","embroidery focus","sleeves close-up",
+        "model styling view","hemline detail","final angle shot"
     ]
-
     images_clean = []
     for i, img_url in enumerate(images):
-        angle_desc = descriptors[i] if i < len(descriptors) else "additional angle"
-        alt_text = (
-            f"Model wearing {title}, "
-            f"{angle_desc}, "
-            f"a Pakistani designer outfit by {vendor}, "
-            f"available online in the UK."
-        )
+        angle = descriptors[i] if i < len(descriptors) else "additional angle"
+        alt   = (f"Model wearing {title}, {angle}, "
+                 f"a Pakistani designer outfit by {vendor}, available online in the UK.")
         images_clean.append({
             "originalSource": img_url,
-            "altText": alt_text,
-            "mediaContentType": "IMAGE"
+            "altText":        alt,
+            "mediaContentType":"IMAGE"
         })
 
     return {
-        "handle": handle,
-        "title": formatted,
+        "handle":          handle,
+        "title":           formatted,
         "raw_description": description,
-        "vendor": vendor,
-        "variants": variants,
-        "images": images_clean
+        "vendor":          vendor,
+        "variants":        variants,
+        "images":          images_clean
     }
-
 # -----------------------------------
 # 4. FETCH COLLECTIONS & TAGS
 # -----------------------------------
