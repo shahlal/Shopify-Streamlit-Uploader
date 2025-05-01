@@ -690,15 +690,42 @@ def enhance_description_via_gpt(raw_description, product_title, vendor, product_
 def main_app():
     st.title("🚀 Shopify Uploader")
 
+    # -----------------------------------
+    # Product Type selector
+    # -----------------------------------
     TYPES = [
         "Casual Pret", "Luxury Pret", "Formal", "Bridal", "Festive",
         "Luxury Lawn", "Summer Lawn", "Winter Collection", "Eid Collection",
         "Chiffon", "Silk", "Party Wear"
     ]
-
     sel_type = st.selectbox("Select Product Type:", TYPES)
-    url = st.text_input("Enter Product or Collection URL:")
 
+    # -----------------------------------
+    # NEW: File uploader for batch URLs
+    # -----------------------------------
+    uploaded_file = st.file_uploader(
+        "Upload a file (txt or csv) with one URL per line",
+        type=["txt", "csv"]
+    )
+
+    # Only show manual URL input if no file provided
+    if not uploaded_file:
+        url = st.text_input("Enter Product or Collection URL:")
+        urls_to_process = [url.strip()] if url else []
+    else:
+        if uploaded_file.name.lower().endswith(".csv"):
+            import pandas as pd
+            df = pd.read_csv(uploaded_file, header=None)
+            urls_to_process = df.iloc[:, 0].dropna().astype(str).str.strip().tolist()
+        else:
+            content = uploaded_file.read().decode("utf-8")
+            urls_to_process = [
+                line.strip() for line in content.splitlines() if line.strip()
+            ]
+
+    # -----------------------------------
+    # Fetch Shopify collections, tags and pages
+    # -----------------------------------
     collections, tags = fetch_collections_and_tags()
     delivery_pages, size_pages = fetch_and_filter_pages()
 
@@ -712,69 +739,88 @@ def main_app():
     del_choice = st.selectbox("Select Delivery Page:", ["-- None --"] + list(del_dict.keys()))
     siz_choice = st.selectbox("Select Size Chart Page:", ["-- None --"] + list(siz_dict.keys()))
 
+    # -----------------------------------
+    # Additional metadata inputs
+    # -----------------------------------
     categories_input = st.text_input("Categories (comma-separated):", "Luxury Pret, Festive")
-    related_products_input = st.text_input("Related Products (comma-separated):", "Ivory Embroidered Shirt Set, Pastel Embroidered Kurta Set")
+    related_products_input = st.text_input(
+        "Related Products (comma-separated):",
+        "Ivory Embroidered Shirt Set, Pastel Embroidered Kurta Set"
+    )
     collection = st.text_input("Collection Name:", "Eid Collection")
 
+    # -----------------------------------
+    # Run upload
+    # -----------------------------------
     if st.button("Run Upload"):
-        if not url:
-            st.warning("Please enter a URL.")
+        if not urls_to_process:
+            st.warning("Please enter a URL or upload a file.")
             return
 
-        coll_ids = [coll_dict[cname] for cname in sel_coll]
-        del_id = del_dict.get(del_choice) if del_choice != "-- None --" else None
-        siz_id = siz_dict.get(siz_choice) if siz_choice != "-- None --" else None
+        # Convert selections into IDs
+        coll_ids = [coll_dict[name] for name in sel_coll]
+        del_id   = del_dict.get(del_choice) if del_choice != "-- None --" else None
+        siz_id   = siz_dict.get(siz_choice) if siz_choice != "-- None --" else None
 
+        # Fetch navigation URLs once
         collection_urls, product_urls = get_navigation_links()
 
         def process_one(product_url):
             p_data = scrape_product(product_url)
-            category_list = [cat.strip() for cat in categories_input.split(",") if cat.strip()]
-            related_product_list = [rp.strip() for rp in related_products_input.split(",") if rp.strip()]
+
+            # GPT-enhanced description
+            category_list = [c.strip() for c in categories_input.split(",") if c.strip()]
+            related_list  = [r.strip() for r in related_products_input.split(",") if r.strip()]
 
             p_data["enhanced_description"] = enhance_description_via_gpt(
-                raw_description=p_data["raw_description"],
-                product_title=p_data["title"],
-                vendor=p_data["vendor"],
-                product_type=sel_type,
-                categories=category_list,
-                related_products=related_product_list,
-                collection=collection,
-                collection_urls=collection_urls,
-                product_urls=product_urls
+                raw_description   = p_data["raw_description"],
+                product_title     = p_data["title"],
+                vendor            = p_data["vendor"],
+                product_type      = sel_type,
+                categories        = category_list,
+                related_products  = related_list,
+                collection        = collection,
+                collection_urls   = collection_urls,
+                product_urls      = product_urls
             )
 
+            # Assign type and tags
             p_data["productType"] = sel_type
-            p_data["tags"] = sel_tags
+            p_data["tags"]        = sel_tags
 
+            # Create product & variants
             product_id, inv_ids = create_product_with_variants(p_data)
             if not product_id:
                 return
 
+            # Metafields & inventory
             update_product_category(product_id)
             update_faqs_metafield(product_id)
             update_we_care_and_disclaimer(product_id)
             update_delivery_and_size_chart_metafields(product_id, del_id, siz_id)
+
             enable_inventory_tracking(inv_ids)
             activate_inventory(inv_ids)
             set_inventory_quantity(inv_ids)
             upload_media(product_id, p_data)
 
+            # Publish & add to collections
             publication_ids = get_publication_ids()
             publish_product(product_id, publication_ids)
-
             add_product_to_collections(product_id, coll_ids)
 
             st.success(f"Uploaded: {p_data['title']}")
 
-        if "/products/" in url:
-            st.info("Single Product Mode")
-            process_one(url)
-        else:
-            st.info("Collection Mode")
-            product_urls = scrape_collection(url)
-            for p_url in product_urls:
-                process_one(p_url)
+        # Loop through each URL (product or collection)
+        for u in urls_to_process:
+            if "/products/" in u:
+                st.info(f"Single Product Mode: {u}")
+                process_one(u)
+            else:
+                st.info(f"Collection Mode: {u}")
+                for p_url in scrape_collection(u):
+                    process_one(p_url)
+
 # -----------------------------------
 # 8. ENTRY POINT
 # -----------------------------------
