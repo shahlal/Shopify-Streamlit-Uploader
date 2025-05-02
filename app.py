@@ -83,27 +83,9 @@ def scrape_collection(url):
     st.success(f"Found {len(product_urls)} products.")
     return product_urls
 
-# Dynamic Pricing Function (New!)
 
 
-def dynamic_pricing(original_price):
-    # 1) Determine your markup as before
-    if original_price <= 100:
-        markup = 50
-    elif 101 <= original_price <= 199:
-        markup = 65
-    elif 200 <= original_price <= 299:
-        markup = 75
-    else:  # original_price >= 300
-        markup = 100
 
-    # 2) Apply markup
-    new_price = original_price + markup
-
-    # 3) Round up to nearest £5
-    rounded_price = math.ceil(new_price / 5) * 5
-
-    return rounded_price
 
 
 def scrape_product(url):
@@ -112,75 +94,77 @@ def scrape_product(url):
     res.raise_for_status()
     soup = BeautifulSoup(res.text, "html.parser")
 
-    # ─── JSON-LD / metadata extraction ─────────────────────────────────────
-    ld = soup.find("script", type="application/ld+json")
-    data = json.loads(ld.string) if ld and ld.string else {}
+    # ─── 1. THEME-SPECIFIC JSON BLOB ──────────────────────────────────────────────
+    # Try the 'ModelJson' template first (used by Qalamkar theme)
+    model_tag = soup.find(
+        "script",
+        {"type": "application/json",
+         "id": lambda x: x and x.startswith("ModelJson-template")}
+    )
+    if model_tag and model_tag.string:
+        # JSON is a list where first element is the product data
+        product_data = json.loads(model_tag.string)[0]
+    else:
+        # Fallback to standard LD+JSON
+        ld = soup.find("script", type="application/ld+json")
+        product_data = json.loads(ld.string) if ld and ld.string else {}
 
-    title       = data.get("name", "No Title")
-    description = data.get("description", "")
-    images      = data.get("image", []) or []
-    if isinstance(images, str):
-        images = [images]
+    title       = product_data.get("name", "No Title")
+    description = product_data.get("description", "")
+    handle      = url.split("/products/")[-1].split("?")[0]
+    vendor      = url.split('/')[2].split('.')[0].capitalize()
+
+    # ─── 2. IMAGE EXTRACTION ──────────────────────────────────────────────────────
+    # First try pulling from JSON
+    images = product_data.get("image", []) or []
+
+    # If JSON has no images, fall back to Flickity carousel HTML
+    if not images:
+        images = []
+        for img in soup.select("img.photoswipe__image"):
+            src = img.get("data-photoswipe-src") or img.get("src")
+            if not src:
+                continue
+            # Normalise protocol-relative URLs
+            if src.startswith("//"):
+                src = "https:" + src
+            images.append(src)
+
+    # Limit to your usual maximum
     images = images[:10]
 
-    handle = url.split("/products/")[-1].split("?")[0]
-    vendor = url.split('/')[2].split('.')[0].capitalize()
-
-    # Build your formatted title
-    coll_link = soup.find('a', href=lambda x: x and '/collections/' in x and '/products/' not in x)
-    coll_name = (coll_link.get_text(strip=True) 
-                 if coll_link and coll_link.get_text(strip=True).lower() not in ["all products","all"]
-                 else None)
-    formatted = f"{vendor} | {coll_name} | {title}" if coll_name else f"{vendor} | {title}"
-
-    # ─── VARIANTS ────────────────────────────────────────────────────────────
+    # ─── 3. VARIANTS via .js endpoint (unchanged) ────────────────────────────────
     variants = []
     try:
-        vres     = requests.get(f"https://{url.split('/')[2]}/products/{handle}.js",
-                                headers={"User-Agent": "Mozilla/5.0"}, verify=False)
-        var_json = vres.json()
-
+        domain    = url.split('/')[2]
+        vres      = requests.get(
+            f"https://{domain}/products/{handle}.js",
+            headers={"User-Agent": "Mozilla/5.0"}, verify=False
+        )
+        var_json  = vres.json()
         for v in var_json.get("variants", []):
             size_label     = v.get("public_title") or v.get("title") or "Default"
             original_price = float(v["price"]) / 100
             adjusted_price = dynamic_pricing(original_price)
-
-            compare_at_price = (f"{float(v['compare_at_price'])/100:.2f}"
-                                if v.get("compare_at_price") else None)
+            compare_at     = (f"{float(v['compare_at_price'])/100:.2f}"
+                              if v.get("compare_at_price") else None)
 
             variants.append({
                 "size":           size_label,
-                "price":          f"{adjusted_price:.2f}",  # rounded to £5 increments
-                "compareAtPrice": compare_at_price,
-                "sku":            v.get("sku","")
+                "price":          f"{adjusted_price:.2f}",
+                "compareAtPrice": compare_at,
+                "sku":            v.get("sku", "")
             })
     except Exception:
         st.warning("Failed to fetch variant info")
 
-    # ─── IMAGES CLEANUP ──────────────────────────────────────────────────────
-    descriptors = [
-        "front view","back view","side angle","close-up detail",
-        "three-quarter view","embroidery focus","sleeves close-up",
-        "model styling view","hemline detail","final angle shot"
-    ]
-    images_clean = []
-    for i, img_url in enumerate(images):
-        angle = descriptors[i] if i < len(descriptors) else "additional angle"
-        alt   = (f"Model wearing {title}, {angle}, "
-                 f"a Pakistani designer outfit by {vendor}, available online in the UK.")
-        images_clean.append({
-            "originalSource": img_url,
-            "altText":        alt,
-            "mediaContentType":"IMAGE"
-        })
-
     return {
         "handle":          handle,
-        "title":           formatted,
+        "title":           f"{vendor} | {title}",
         "raw_description": description,
         "vendor":          vendor,
         "variants":        variants,
-        "images":          images_clean
+        "images":          images
     }
 # -----------------------------------
 # 4. FETCH COLLECTIONS & TAGS
