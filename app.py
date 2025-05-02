@@ -94,7 +94,7 @@ def scrape_product(url):
     res.raise_for_status()
     soup = BeautifulSoup(res.text, "html.parser")
 
-    # ─── 1. ROBUST THEME JSON PARSING ───────────────────────────────────────────
+    # ─── 1. THEME JSON PARSING ───────────────────────────────────────────────────
     product_data = {}
     model_tag = soup.find(
         "script",
@@ -108,13 +108,11 @@ def scrape_product(url):
                 product_data = loaded[0]
             elif isinstance(loaded, dict):
                 product_data = loaded
-            else:
-                # empty list or unexpected type → fallback
-                raise ValueError("Empty or unknown JSON")
         except Exception:
-            # fallback to JSON-LD below
             product_data = {}
+
     if not product_data:
+        # Fallback to LD+JSON
         ld = soup.find("script", type="application/ld+json")
         try:
             product_data = json.loads(ld.string) if ld and ld.string else {}
@@ -126,20 +124,65 @@ def scrape_product(url):
     handle      = url.split("/products/")[-1].split("?")[0]
     vendor      = url.split('/')[2].split('.')[0].capitalize()
 
+    # ─── 2. IMAGE EXTRACTION ──────────────────────────────────────────────────────
+    # 2a) Try the proper 'images' array first
+    raw_images = product_data.get("images") or []
 
-    # ─── 2. IMAGE EXTRACTION WITH SLIDER FALLBACK ───────────────────────────────
-    images = product_data.get("image", []) or []
-    if not images:
-        # grab Flickity / Photoswipe images
+    # 2b) If that isn't a list, normalise singular 'image' entry
+    if not isinstance(raw_images, list):
+        raw_images = []
+        single = product_data.get("image")
+        if isinstance(single, str):
+            raw_images = [single]
+        elif isinstance(single, dict) and single.get("src"):
+            raw_images = [single["src"]]
+
+    # 2c) If still empty, fall back to the Flickity carousel in the HTML
+    if not raw_images:
         for img in soup.select("img.photoswipe__image"):
             src = img.get("data-photoswipe-src") or img.get("src")
             if not src:
                 continue
             if src.startswith("//"):
                 src = "https:" + src
-            images.append(src)
-    images = images[:10]
+            raw_images.append(src)
 
+    # 2d) Trim down to your usual maximum
+    images = raw_images[:10]
+
+    # ─── 3. VARIANTS VIA .js ENDPOINT ────────────────────────────────────────────
+    variants = []
+    try:
+        domain   = url.split('/')[2]
+        vres     = requests.get(
+            f"https://{domain}/products/{handle}.js",
+            headers={"User-Agent": "Mozilla/5.0"}, verify=False
+        )
+        var_json = vres.json()
+        for v in var_json.get("variants", []):
+            size_label     = v.get("public_title") or v.get("title") or "Default"
+            original_price = float(v["price"]) / 100
+            adjusted_price = dynamic_pricing(original_price)
+            compare_at     = (f"{float(v['compare_at_price'])/100:.2f}"
+                               if v.get("compare_at_price") else None)
+
+            variants.append({
+                "size":           size_label,
+                "price":          f"{adjusted_price:.2f}",
+                "compareAtPrice": compare_at,
+                "sku":            v.get("sku", "")
+            })
+    except Exception:
+        st.warning("Failed to fetch variant info")
+
+    return {
+        "handle":          handle,
+        "title":           f"{vendor} | {title}",
+        "raw_description": description,
+        "vendor":          vendor,
+        "variants":        variants,
+        "images":          images
+    }
 
     # ─── 3. VARIANTS VIA .js ENDPOINT (unchanged) ─────────────────────────────
     variants = []
